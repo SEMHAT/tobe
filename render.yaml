@@ -1,0 +1,18 @@
+# Déploiement en un clic sur Render (https://render.com) : API + application, disque persistant.
+services:
+  - type: web
+    name: tobe
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: tobe-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: ADMIN_PHONES
+        sync: false
+      - key: EXPOSE_OTP
+        value: "false"
+      - key: SMS_WEBHOOK_URL
+        sync: false

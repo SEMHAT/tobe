@@ -1,0 +1,17 @@
+{
+  "name": "ToBe — Sois-y. Retrouve-toi.",
+  "short_name": "ToBe",
+  "description": "Les événements de Lomé et d'Afrique de l'Ouest : billets, votes, cagnottes et vos photos retrouvées par votre visage.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E0E12",
+  "theme_color": "#0E0E12",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

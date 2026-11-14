@@ -1,0 +1,36 @@
+{
+  "name": "@tobe/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "prepare-models": "node scripts/copy-models.mjs",
+    "build": "npm run prepare-models && tsc -p tsconfig.json && vite build && node scripts/spa-fallback.mjs",
+    "build:demo": "npm run prepare-models && tsc -p tsconfig.json && VITE_DEMO=true vite build && node scripts/spa-fallback.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@tobe/core": "*",
+    "@types/leaflet": "^1.9.22",
+    "@vladmandic/face-api": "^1.7.15",
+    "idb-keyval": "^6.2.1",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.511.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.7",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "tailwindcss": "^4.1.7",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

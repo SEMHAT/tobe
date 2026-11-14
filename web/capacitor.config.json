@@ -1,0 +1,8 @@
+{
+  "appId": "com.eledji.tobe",
+  "appName": "ToBe",
+  "webDir": "dist",
+  "backgroundColor": "#0E0E12",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "always" }
+}
