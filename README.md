@@ -1,20 +1,21 @@
 # ToBe — Sois-y. Retrouve-toi.
 
-La plateforme des événements de Lomé et d'Afrique de l'Ouest : découvrir les événements classés par impact, prendre ses billets en Mobile Money, voter, contribuer aux cagnottes, et **retrouver ses photos grâce à son visage** (Pass ToBe). Les organisateurs publient en 2 minutes et peuvent **confier l'organisation à l'agence ToBe** d'une case à cocher.
+La plateforme des événements de Lomé et d'Afrique de l'Ouest : découvrir les événements classés par impact, réserver ses places, voter, contribuer aux cagnottes, et **retrouver ses photos grâce à son visage** (Pass ToBe). Les organisateurs publient en 2 minutes et peuvent **confier l'organisation à l'agence ToBe** d'une case à cocher.
 
 ## Ce que contient le dépôt
 
 | Dossier | Rôle |
 | --- | --- |
 | `packages/core` | Toute la logique métier (comptes, événements, impact, billets, votes, cagnottes, photos, demandes ToBe, revenus) et la table des routes de l'API. Testée. |
-| `server` | L'API Node.js (Express) avec stockage SQLite intégré à Node, envoi d'images, limite anti-abus sur les SMS. Sert aussi l'application web. |
+| `server` | L'API Node.js (Express) avec stockage SQLite intégré à Node et envoi d'images. Sert aussi l'application web (hébergement serveur). |
+| `api` | La même API en fonction Vercel : données dans Postgres (Neon), images dans Vercel Blob. C'est ce qui tourne sur tobe.eledji.com. |
 | `web` | L'application mobile (React, Tailwind) : PWA installable, prête pour Capacitor (Android / iOS). |
 
 Le même code métier tourne côté serveur et, en **mode démo**, directement dans le navigateur : c'est ce qui permet de publier une démo complète sans serveur.
 
 ## Fonctionnalités
 
-- **Connexion par téléphone** (+228) et code SMS, sans mot de passe.
+- **Connexion par e-mail** : code à 6 chiffres envoyé par Resend, sans mot de passe.
 - **Accueil** : à la une (événements boostés), ce week-end, votes en cours, les plus marquants.
 - **Explorer** : recherche, catégories, dates, gratuit/payant, tri par date ou par impact, **carte** OpenStreetMap.
 - **Classement par impact** : score sur 100 (taille, portée, type, engagement réel) → badges Local, Ville, Majeur, Phare.
@@ -27,7 +28,7 @@ Le même code métier tourne côté serveur et, en **mode démo**, directement d
 - **Annuaire des prestataires** avec badge « Certifié ToBe » et demandes de devis.
 - **Espace agence ToBe** : demandes « Confier à ToBe » avec suivi (nouveau → contacté → devis → signé), revenus de la plateforme par source.
 
-> Les paiements sont **simulés** dans cette version : aucun montant n'est débité. Le branchement d'un agrégateur Mobile Money se fait dans `packages/core/src/service.ts` (méthode `pay`).
+> **Paiement en ligne désactivé** pour le lancement (`PAYMENTS_ENABLED` absent) : les billets sont **réservés** et réglés à l'entrée ; votes payants, cagnottes, boosts et abonnement Pro affichent « bientôt ». Le branchement d'un agrégateur Mobile Money se fait dans `packages/core/src/service.ts` (méthode `pay`), puis `PAYMENTS_ENABLED=true`.
 
 ## Démarrer en local
 
@@ -37,22 +38,29 @@ npm run dev          # API sur :8787 + application sur :5173
 npm test             # tests de la logique métier et de l'API
 ```
 
-En développement, le code SMS s'affiche à l'écran.
+En local, `SEED=true` charge des données d'exemple et `EXPOSE_OTP=true` affiche le code de connexion à l'écran. Jamais en production.
 
 ## Mettre en ligne sur tobe.eledji.com
 
-### Option 1 — Démo immédiate sur Vercel (recommandé)
-Le fichier `vercel.json` contient déjà tous les réglages.
-1. Sur vercel.com : **Add New → Project**, importez le dépôt `SEMHAT/tobe`, puis **Deploy** (ne changez aucun réglage).
-2. Dans le projet : **Settings → Domains**, ajoutez `tobe.eledji.com`.
-3. Chez votre registrar (Namecheap) : remplacez le CNAME `tobe` par la valeur indiquée par Vercel (en général `cname.vercel-dns.com`).
-Le certificat HTTPS est délivré automatiquement en quelques minutes.
+### Production actuelle — Vercel
+Réglages du projet Vercel (déjà faits) : racine du dépôt, install `npm ci`, build `npm run build:vercel`, sortie `dist`, Node 22. Chaque push sur `main` redéploie.
 
-### Option 2 — Production (serveur)
+Variables d'environnement :
+| Variable | Rôle |
+| --- | --- |
+| `DATABASE_URL` | Postgres Neon (ajoutée par l'intégration Neon) |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob pour les affiches et photos |
+| `RESEND_API_KEY`, `RESEND_EMAIL_DOMAIN` | Envoi des codes de connexion (expéditeur `connexion@eledji.com`, ou `EMAIL_FROM`) |
+| `ADMIN_EMAILS` | E-mails ayant accès à l'espace agence ToBe (séparés par des virgules) |
+| `PAYMENTS_ENABLED` | `true` uniquement quand le paiement Mobile Money est branché |
+
+DNS chez Namecheap : CNAME `tobe` → Vercel ; enregistrements Resend (`resend._domainkey`, `rsend`, `send`, `_dmarc`). L'offre gratuite de Resend envoie 100 e-mails par jour (3 000 par mois).
+
+### Alternative — serveur (Docker)
 Une seule image Docker sert l'API et l'application :
 ```bash
 docker build -t tobe .
-docker run -p 8787:8787 -v tobe-data:/data -e ADMIN_PHONES=+228XXXXXXXX -e EXPOSE_OTP=false tobe
+docker run -p 8787:8787 -v tobe-data:/data -e ADMIN_EMAILS=vous@exemple.com -e RESEND_API_KEY=re_xxx tobe
 ```
 Ou en un clic sur Render avec `render.yaml` (disque persistant inclus). Pointez ensuite `tobe.eledji.com` vers le service (CNAME). Variables : voir `server/.env.example`.
 
@@ -66,7 +74,6 @@ npx cap sync && npx cap open android
 ```
 
 ## À brancher pour la production
-- **SMS** : `SMS_WEBHOOK_URL` (passerelle d'opérateur ou fournisseur SMS).
 - **Paiements** : agrégateur Mobile Money (Mixx by Yas, Moov Money, cartes) avec confirmation par webhook.
 - **Juridique** : conditions d'utilisation, politique de confidentialité, déclaration du traitement des données biométriques auprès de l'autorité togolaise de protection des données, validation du format des votes payants.
 

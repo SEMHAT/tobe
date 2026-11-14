@@ -1,5 +1,5 @@
 /** E-mail de connexion (Resend). Sans clé, le code est seulement écrit dans les journaux. */
-export async function sendLoginCode(email: string, code: string, env: { RESEND_API_KEY?: string; EMAIL_FROM?: string } = {}) {
+export async function sendLoginCode(email: string, code: string, env: { RESEND_API_KEY?: string; EMAIL_FROM?: string; RESEND_EMAIL_DOMAIN?: string } = {}) {
   const key = env.RESEND_API_KEY;
   if (!key) {
     console.log(`[email] code pour ${email} : ${code}`);
@@ -18,7 +18,7 @@ export async function sendLoginCode(email: string, code: string, env: { RESEND_A
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
-      from: env.EMAIL_FROM || "ToBe <connexion@tobe.eledji.com>",
+      from: env.EMAIL_FROM || `ToBe <connexion@${env.RESEND_EMAIL_DOMAIN || "eledji.com"}>`,
       to: [email],
       subject: `${code} est votre code ToBe`,
       html,

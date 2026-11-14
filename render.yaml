@@ -10,9 +10,9 @@ services:
       mountPath: /data
       sizeGB: 5
     envVars:
-      - key: ADMIN_PHONES
+      - key: ADMIN_EMAILS
         sync: false
       - key: EXPOSE_OTP
         value: "false"
-      - key: SMS_WEBHOOK_URL
+      - key: RESEND_API_KEY
         sync: false
