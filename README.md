@@ -48,14 +48,6 @@ Le fichier `vercel.json` contient déjà tous les réglages.
 3. Chez votre registrar (Namecheap) : remplacez le CNAME `tobe` par la valeur indiquée par Vercel (en général `cname.vercel-dns.com`).
 Le certificat HTTPS est délivré automatiquement en quelques minutes.
 
-### Option 1 bis — Démo sur GitHub Pages
-Le workflow `.github/workflows/pages.yml` publie la version de démonstration à chaque push sur `main`.
-1. Dans GitHub : **Settings → Pages → Source : GitHub Actions**, domaine personnalisé `tobe.eledji.com`.
-2. Chez votre hébergeur DNS : un enregistrement **CNAME** `tobe` → `semhat.github.io`.
-
-En démo, les données sont gardées dans le navigateur de chaque visiteur (code SMS de démo : `123456`). Idéal pour présenter le projet ; pour de vrais utilisateurs, prendre l'option 2.
-GitHub Pages sur un dépôt **privé** demande un compte GitHub payant ; sinon, rendre le dépôt public.
-
 ### Option 2 — Production (serveur)
 Une seule image Docker sert l'API et l'application :
 ```bash
