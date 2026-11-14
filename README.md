@@ -41,7 +41,14 @@ En développement, le code SMS s'affiche à l'écran.
 
 ## Mettre en ligne sur tobe.eledji.com
 
-### Option 1 — Démo immédiate (GitHub Pages)
+### Option 1 — Démo immédiate sur Vercel (recommandé)
+Le fichier `vercel.json` contient déjà tous les réglages.
+1. Sur vercel.com : **Add New → Project**, importez le dépôt `SEMHAT/tobe`, puis **Deploy** (ne changez aucun réglage).
+2. Dans le projet : **Settings → Domains**, ajoutez `tobe.eledji.com`.
+3. Chez votre registrar (Namecheap) : remplacez le CNAME `tobe` par la valeur indiquée par Vercel (en général `cname.vercel-dns.com`).
+Le certificat HTTPS est délivré automatiquement en quelques minutes.
+
+### Option 1 bis — Démo sur GitHub Pages
 Le workflow `.github/workflows/pages.yml` publie la version de démonstration à chaque push sur `main`.
 1. Dans GitHub : **Settings → Pages → Source : GitHub Actions**, domaine personnalisé `tobe.eledji.com`.
 2. Chez votre hébergeur DNS : un enregistrement **CNAME** `tobe` → `semhat.github.io`.
