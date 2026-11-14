@@ -96,6 +96,12 @@ export function normalizePhone(raw: string): string {
   return "+" + d;
 }
 
+export function normalizeEmail(raw: string): string {
+  const e = raw.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e) || e.length > 200) throw new Error("Adresse e-mail invalide");
+  return e;
+}
+
 export function formatPhone(p: string): string {
   if (p.startsWith("+228") && p.length === 12) return `+228 ${p.slice(4, 6)} ${p.slice(6, 8)} ${p.slice(8, 10)} ${p.slice(10, 12)}`;
   return p;

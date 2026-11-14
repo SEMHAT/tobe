@@ -8,7 +8,7 @@ export function cx(...c: (string | false | null | undefined)[]) {
 
 type Variant = "gold" | "dark" | "ghost" | "outline" | "danger" | "coral" | "white";
 const VARIANTS: Record<Variant, string> = {
-  gold: "gold-gradient text-[#1b1206] shadow-[0_8px_30px_-8px_rgba(242,178,51,0.55)] active:brightness-95",
+  gold: "brand-gradient text-white shadow-[0_8px_30px_-8px_rgba(24,0,173,0.55)] active:brightness-95",
   coral: "bg-coral text-white shadow-[0_8px_30px_-10px_rgba(255,90,78,0.6)]",
   dark: "bg-card-2 text-ink border border-line",
   ghost: "text-muted hover:text-ink",
@@ -50,7 +50,7 @@ export function Button({
 
 export function IconButton({ children, className, label, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button aria-label={label} title={label} {...rest} className={cx("grid size-10 place-items-center rounded-full bg-black/35 text-white backdrop-blur-md transition active:scale-95", className)}>
+    <button aria-label={label} title={label} {...rest} className={cx("grid size-10 place-items-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-black/55 active:scale-95", className)}>
       {children}
     </button>
   );
@@ -59,7 +59,7 @@ export function IconButton({ children, className, label, ...rest }: ButtonHTMLAt
 export function TopBar({ title, back = true, right, transparent, onBack }: { title?: ReactNode; back?: boolean; right?: ReactNode; transparent?: boolean; onBack?: () => void }) {
   const nav = useNavigate();
   return (
-    <header className={cx("sticky top-0 z-30 pt-safe", transparent ? "pointer-events-none" : "bg-app/85 backdrop-blur-xl border-b border-line")}>
+    <header className={cx("sticky top-0 z-30 pt-safe lg:top-16", transparent ? "pointer-events-none" : "bg-app/85 backdrop-blur-xl border-b border-line")}>
       <div className="flex h-14 items-center gap-2 px-3">
         {back ? (
           <IconButton label="Retour" onClick={() => (onBack ? onBack() : history.length > 1 ? nav(-1) : nav("/"))} className={cx("pointer-events-auto", !transparent && "bg-transparent text-ink")}>
@@ -90,7 +90,7 @@ export function Chip({ active, children, onClick, icon }: { active?: boolean; ch
       onClick={onClick}
       className={cx(
         "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition",
-        active ? "border-gold bg-gold text-[#1b1206]" : "border-line bg-card text-ink",
+        active ? "border-brand bg-brand text-white" : "border-line bg-card text-ink hover:border-ink/30",
       )}
     >
       {icon}
@@ -120,10 +120,10 @@ export function Sheet({ open, onClose, title, children, tall }: { open: boolean;
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="absolute inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true">
-      <div className="fade-in absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
-      <div className={cx("sheet-in relative flex max-h-[92%] flex-col rounded-t-[28px] border-t border-line bg-app-2 pb-safe", tall && "min-h-[70%]")}>
-        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-white/15" />
+    <div className="fixed inset-0 z-[70] flex flex-col justify-end lg:items-center lg:justify-center lg:p-6" role="dialog" aria-modal="true">
+      <div className="fade-in absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
+      <div className={cx("sheet-in relative flex max-h-[92%] flex-col rounded-t-[28px] border-t border-line bg-app pb-safe lg:max-h-[88vh] lg:w-full lg:max-w-[520px] lg:rounded-[28px] lg:border lg:pb-0 lg:shadow-2xl", tall && "min-h-[70%] lg:min-h-0")}>
+        <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-ink/15 lg:hidden" />
         <div className="flex items-center justify-between px-5 pb-2 pt-3">
           <div className="font-display text-lg font-bold">{title}</div>
           <button aria-label="Fermer" onClick={onClose} className="grid size-9 place-items-center rounded-full bg-card text-muted">
@@ -147,7 +147,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
 }
 
 export const inputCls =
-  "w-full rounded-2xl border border-line bg-card px-4 py-3 text-ink outline-none placeholder:text-faint focus:border-gold/70 focus:ring-2 focus:ring-gold/20 transition";
+  "w-full rounded-2xl border border-line bg-card px-4 py-3 text-ink outline-none placeholder:text-faint focus:border-brand/70 focus:ring-2 focus:ring-brand/20 transition";
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -157,7 +157,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={cx("relative h-7 w-12 shrink-0 rounded-full transition", checked ? "bg-gold" : "bg-white/15")}
+      className={cx("relative h-7 w-12 shrink-0 rounded-full transition", checked ? "bg-brand" : "bg-ink/15")}
     >
       <span className={cx("absolute top-1 size-5 rounded-full bg-white shadow transition-all", checked ? "left-6" : "left-1")} />
     </button>
@@ -172,7 +172,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
-          className={cx("h-9 flex-1 rounded-full text-sm font-semibold transition", value === o.value ? "bg-gold text-[#1b1206]" : "text-muted")}
+          className={cx("h-9 flex-1 rounded-full text-sm font-semibold transition", value === o.value ? "bg-brand text-white" : "text-muted")}
         >
           {o.label}
         </button>
@@ -184,7 +184,7 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
 export function Empty({ icon, title, text, action }: { icon: ReactNode; title: string; text?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center px-8 py-14 text-center">
-      <div className="mb-4 grid size-16 place-items-center rounded-3xl bg-card text-gold">{icon}</div>
+      <div className="mb-4 grid size-16 place-items-center rounded-3xl bg-card text-brand">{icon}</div>
       <div className="font-display text-lg font-bold">{title}</div>
       {text && <p className="mt-1.5 text-sm leading-relaxed text-muted">{text}</p>}
       {action && <div className="mt-5">{action}</div>}
@@ -193,7 +193,7 @@ export function Empty({ icon, title, text, action }: { icon: ReactNode; title: s
 }
 
 export function Spinner({ className }: { className?: string }) {
-  return <Loader2 className={cx("size-6 animate-spin text-gold", className)} />;
+  return <Loader2 className={cx("size-6 animate-spin text-brand", className)} />;
 }
 
 export function PageLoader() {
@@ -219,8 +219,8 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 
 export function Progress({ value, className }: { value: number; className?: string }) {
   return (
-    <div className={cx("h-2.5 overflow-hidden rounded-full bg-white/10", className)}>
-      <div className="h-full rounded-full gold-gradient transition-all duration-700" style={{ width: `${Math.max(2, Math.min(100, value))}%` }} />
+    <div className={cx("h-2.5 overflow-hidden rounded-full bg-ink/10", className)}>
+      <div className="h-full rounded-full brand-gradient transition-all duration-700" style={{ width: `${Math.max(2, Math.min(100, value))}%` }} />
     </div>
   );
 }

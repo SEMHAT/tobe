@@ -10,7 +10,7 @@ test("API complète de bout en bout, avec persistance SQLite", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tobe-"));
   const file = path.join(dir, "t.sqlite");
   const { db, close } = openSqliteDb(file);
-  const { app } = createApp(db, { uploadDir: path.join(dir, "up"), exposeOtp: true, adminPhones: ["+22899999999"], seed: true, webDir: dir });
+  const { app } = createApp(db, { uploadDir: path.join(dir, "up"), exposeOtp: true, adminEmails: ["admin@tobe.test"], seed: true, webDir: dir });
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
   const api = async (method: string, p: string, body?: unknown, token?: string) => {
@@ -22,13 +22,15 @@ test("API complète de bout en bout, avec persistance SQLite", async () => {
     const home = await api("GET", "/home");
     assert.ok(home.body.top.length > 5);
     assert.equal((await api("GET", "/me")).status, 401);
-    const otp = await api("POST", "/auth/otp", { phone: "90 11 22 33" });
-    const login = await api("POST", "/auth/verify", { phone: "90112233", code: otp.body.devCode, name: "Ama" });
+    assert.equal((await api("GET", "/config")).body.paymentsEnabled, false);
+    const otp = await api("POST", "/auth/otp", { email: "Ama@Exemple.tg" });
+    const login = await api("POST", "/auth/verify", { email: "ama@exemple.tg", code: otp.body.devCode, name: "Ama" });
     const t = login.body.token as string;
     assert.ok(t);
-    const buy = await api("POST", "/events/lome-afro-night/tickets", { ticketTypeId: "tkt_afro_std", qty: 1, method: "moov" }, t);
+    const buy = await api("POST", "/events/lome-afro-night/tickets", { ticketTypeId: "tkt_afro_std", qty: 1, method: "cash" }, t);
     assert.equal(buy.status, 200);
-    assert.equal(buy.body.total, 5200); // organisateur Pro : frais réduits à 4 %
+    assert.equal(buy.body.status, "reserved"); // sans paiement en ligne : à régler à l'entrée
+    assert.equal(buy.body.total, 5000);
     assert.equal((await api("GET", "/me/tickets", undefined, t)).body.length, 1);
     assert.equal((await api("GET", "/events/mariage-afi-koffi", undefined, t)).status, 403);
     assert.equal((await api("GET", "/events/mariage-afi-koffi?code=AFI2026", undefined, t)).status, 200);
@@ -38,9 +40,7 @@ test("API complète de bout en bout, avec persistance SQLite", async () => {
     assert.equal(again.status, 400);
     assert.match(again.body.error, /déjà/);
     // Envoi d'image
-    const form = new FormData();
-    form.append("file", new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" }), "a.jpg");
-    const up = await fetch(`http://localhost:${port}/api/uploads`, { method: "POST", body: form, headers: { authorization: `Bearer ${t}` } });
+    const up = await fetch(`http://localhost:${port}/api/uploads`, { method: "POST", body: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), headers: { authorization: `Bearer ${t}`, "content-type": "image/jpeg" } });
     const upBody = (await up.json()) as { url: string };
     assert.match(upBody.url, /^\/uploads\//);
     assert.equal((await fetch(`http://localhost:${port}${upBody.url}`)).status, 200);

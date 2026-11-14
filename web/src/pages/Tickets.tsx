@@ -55,7 +55,7 @@ export function Tickets() {
       {loading && <PageLoader />}
       {error && <ErrorState message={error.message} />}
       {data && list.length === 0 && (
-        <Empty icon={<TicketIcon className="size-7" />} title={tab === "next" ? "Aucun billet à venir" : "Aucun billet passé"} text="Vos billets apparaîtront ici après l'achat ou la réservation." action={<Link to="/explorer" className="font-semibold text-gold">Trouver un événement</Link>} />
+        <Empty icon={<TicketIcon className="size-7" />} title={tab === "next" ? "Aucun billet à venir" : "Aucun billet passé"} text="Vos billets apparaîtront ici après l'achat ou la réservation." action={<Link to="/explorer" className="font-semibold text-brand">Trouver un événement</Link>} />
       )}
       <div className="space-y-3 px-5 py-4">
         {list.map((t) => (
@@ -64,8 +64,11 @@ export function Tickets() {
             <div className="min-w-0 flex-1 p-3.5">
               <div className="truncate font-display font-bold">{t.event?.title ?? "Événement"}</div>
               <div className="mt-0.5 text-sm text-muted">{t.event ? shortDate(t.event.startsAt) : ""}</div>
-              <div className="mt-2 inline-flex rounded-full bg-gold/15 px-2.5 py-1 text-xs font-bold text-gold">
-                {t.qty} × {t.ticketTypeName}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="inline-flex rounded-full bg-brand/15 px-2.5 py-1 text-xs font-bold text-brand">
+                  {t.qty} × {t.ticketTypeName}
+                </span>
+                {t.status === "reserved" && <span className="inline-flex rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-muted">À payer à l'entrée</span>}
               </div>
             </div>
             <div className="grid place-items-center border-l border-dashed border-line px-3">
@@ -112,11 +115,11 @@ export function TicketPage() {
           <CheckCircle2 className="size-6 shrink-0 text-emerald" />
           <div className="text-sm">
             <div className="font-semibold">C'est confirmé !</div>
-            <div className="text-muted">Présentez ce QR code à l'entrée. Il reste disponible sans connexion.</div>
+            <div className="text-muted">{t.status === "reserved" ? `Présentez ce QR code à l'entrée et réglez ${formatFcfa(t.total)} sur place.` : "Présentez ce QR code à l'entrée. Il reste disponible sans connexion."}</div>
           </div>
         </div>
       )}
-      <div className="mx-5 mt-5 overflow-hidden rounded-[28px] bg-white text-[#16141c] shadow-2xl">
+      <div className="mx-5 mt-5 overflow-hidden rounded-[28px] border border-line bg-white text-[#0b0b12] shadow-[0_30px_60px_-30px_rgba(11,11,18,0.45)] lg:mx-auto lg:max-w-md">
         <Poster cover={e?.cover ?? null} theme={e?.theme ?? "or"} category={e?.category ?? "autre"} title={e?.title} className="h-36">
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
           <div className="absolute inset-x-5 bottom-4 text-white">
@@ -138,13 +141,13 @@ export function TicketPage() {
           <Info label="Titulaire" value={t.holder ?? "Vous"} />
           <Info label="Billet" value={`${t.qty} × ${t.ticketTypeName}`} />
           <Info label="Lieu" value={e?.venue ?? ""} />
-          <Info label="Payé" value={t.total ? `${formatFcfa(t.total)} · ${PAY_METHOD_LABELS[t.method]}` : "Gratuit"} />
+          <Info label={t.status === "reserved" ? "À régler à l'entrée" : "Payé"} value={t.status === "reserved" ? formatFcfa(t.total) : t.total ? `${formatFcfa(t.total)} · ${PAY_METHOD_LABELS[t.method]}` : "Gratuit"} />
         </div>
       </div>
       {e && (
-        <div className="mx-5 mt-4 grid grid-cols-2 gap-3">
+        <div className="mx-5 mt-4 grid grid-cols-2 gap-3 lg:mx-auto lg:max-w-md">
           <a className="flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-card text-sm font-semibold" href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(`${e.venue}, ${e.city}`)}`} target="_blank" rel="noreferrer">
-            <MapPin className="size-4 text-gold" /> Itinéraire
+            <MapPin className="size-4 text-brand" /> Itinéraire
           </a>
           <Link className="flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-card text-sm font-semibold" to={`/evenement/${e.slug}`}>
             Voir l'événement

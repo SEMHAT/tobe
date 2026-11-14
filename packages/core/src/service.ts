@@ -6,6 +6,7 @@ import {
   computeImpact,
   fingerprint,
   newId,
+  normalizeEmail,
   normalizePhone,
   randomCode,
   randomToken,
@@ -47,14 +48,16 @@ export class ApiError extends Error {
 
 export interface ServiceOptions {
   now?: () => Date;
-  /** Renvoie le code SMS dans la réponse (développement et démo uniquement). */
+  /** Renvoie le code de connexion dans la réponse (développement et démo uniquement). */
   exposeOtp?: boolean;
-  /** Numéros qui ont accès à l'espace ToBe (demandes d'organisation, revenus). */
-  adminPhones?: string[];
+  /** Adresses e-mail qui ont accès à l'espace ToBe (demandes d'organisation, prestataires, revenus). */
+  adminEmails?: string[];
   /** Mode démonstration : chaque compte est admin et reçoit un événement d'exemple. */
   demo?: boolean;
-  /** Envoi du SMS (à brancher sur un fournisseur en production). */
-  sendSms?: (phone: string, text: string) => void;
+  /** Paiements en ligne actifs (agrégateur Mobile Money branché). Sinon : réservation et paiement à l'entrée. */
+  paymentsEnabled?: boolean;
+  /** Envoi du code de connexion par e-mail. */
+  sendCode?: (email: string, code: string) => Promise<void> | void;
 }
 
 // ---------- Vues renvoyées à l'interface ----------
@@ -139,14 +142,16 @@ export interface CreateEventInput {
     candidates: { name: string; bio?: string; photo?: string | null }[];
   } | null;
   cagnotte?: { title: string; description?: string; goal: number } | null;
-  tobe?: { level: TobeRequest["level"]; services: string[]; budget?: string; note?: string } | null;
+  tobe?: { level: TobeRequest["level"]; services: string[]; budget?: string; note?: string; phone?: string } | null;
   boost?: { plan: BoostPlan; method: PayMethod } | null;
 }
 
 const DAY = 86_400_000;
 
 export class ToBeService {
-  private opts: Required<Omit<ServiceOptions, "sendSms">> & Pick<ServiceOptions, "sendSms">;
+  private opts: Required<Omit<ServiceOptions, "sendCode">> & Pick<ServiceOptions, "sendCode">;
+  /** Tâches asynchrones à attendre avant de répondre (envoi d'e-mails). */
+  pending: Promise<unknown>[] = [];
 
   constructor(
     public db: Db,
@@ -155,15 +160,10 @@ export class ToBeService {
     this.opts = {
       now: options.now ?? (() => new Date()),
       exposeOtp: options.exposeOtp ?? false,
-      adminPhones: (options.adminPhones ?? []).map((p) => {
-        try {
-          return normalizePhone(p);
-        } catch {
-          return p;
-        }
-      }),
+      adminEmails: (options.adminEmails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean),
       demo: options.demo ?? false,
-      sendSms: options.sendSms,
+      paymentsEnabled: options.paymentsEnabled ?? false,
+      sendCode: options.sendCode,
     };
   }
 
@@ -175,36 +175,47 @@ export class ToBeService {
   }
 
   // =====================================================================
-  // Authentification par téléphone
+  // Authentification par code envoyé par e-mail
   // =====================================================================
-  requestOtp(rawPhone: string): { sent: true; phone: string; devCode?: string } {
-    const phone = normalizePhone(rawPhone);
-    const code = this.opts.demo ? "123456" : String(100000 + Math.floor(Math.random() * 900000));
-    this.db.otps.insert({ id: phone, code, attempts: 0, expiresAt: new Date(this.now().getTime() + 10 * 60_000).toISOString() });
-    this.opts.sendSms?.(phone, `ToBe : votre code de connexion est ${code}. Il expire dans 10 minutes.`);
-    return { sent: true, phone, ...(this.opts.exposeOtp ? { devCode: code } : {}) };
+  config() {
+    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo };
   }
 
-  verifyOtp(rawPhone: string, code: string, name?: string): { token: string; user: User; isNew: boolean } {
-    const phone = normalizePhone(rawPhone);
-    const otp = this.db.otps.get(phone);
+  requestOtp(rawEmail: string): { sent: true; email: string; devCode?: string } {
+    const email = normalizeEmail(rawEmail);
+    const existing = this.db.otps.get(email);
+    if (existing && new Date(existing.expiresAt).getTime() - this.now().getTime() > 9 * 60_000) {
+      throw new ApiError(429, "Un code vient d'être envoyé. Patientez une minute avant d'en demander un autre.");
+    }
+    const code = this.opts.demo ? "123456" : String(100000 + Math.floor(Math.random() * 900000));
+    this.db.otps.insert({ id: email, code, attempts: 0, expiresAt: new Date(this.now().getTime() + 10 * 60_000).toISOString() });
+    const task = this.opts.sendCode?.(email, code);
+    if (task) this.pending.push(Promise.resolve(task).catch((e) => console.error("[email] échec", e)));
+    return { sent: true, email, ...(this.opts.exposeOtp ? { devCode: code } : {}) };
+  }
+
+  verifyOtp(rawEmail: string, code: string, name?: string): { token: string; user: User; isNew: boolean } {
+    const email = normalizeEmail(rawEmail);
+    const otp = this.db.otps.get(email);
     if (!otp) throw new ApiError(400, "Demandez d'abord un code");
     if (new Date(otp.expiresAt) < this.now()) throw new ApiError(400, "Ce code a expiré, demandez-en un nouveau");
     if (otp.attempts >= 5) throw new ApiError(429, "Trop d'essais, demandez un nouveau code");
     if (otp.code !== code.trim()) {
-      this.db.otps.update(phone, { attempts: otp.attempts + 1 });
+      this.db.otps.update(email, { attempts: otp.attempts + 1 });
       throw new ApiError(400, "Code incorrect");
     }
-    this.db.otps.remove(phone);
-    let user = this.db.users.find((u) => u.phone === phone);
+    this.db.otps.remove(email);
+    let user = this.db.users.find((u) => u.email === email);
     const isNew = !user;
+    const isAdmin = this.opts.demo || this.opts.adminEmails.includes(email);
     if (!user) {
       user = this.db.users.insert({
         id: newId("usr"),
-        phone,
+        email,
+        phone: null,
         name: name?.trim() || "",
         createdAt: this.iso(),
-        role: this.opts.demo || this.opts.adminPhones.includes(phone) ? "admin" : "user",
+        role: isAdmin ? "admin" : "user",
         passEnabled: false,
         faceDescriptor: null,
         neverShow: false,
@@ -212,12 +223,12 @@ export class ToBeService {
         pro: false,
       });
       if (this.opts.demo) this.giveDemoEvents(user);
-    } else if (this.opts.adminPhones.includes(phone) && user.role !== "admin") {
+    } else if (isAdmin && user.role !== "admin") {
       user = this.db.users.update(user.id, { role: "admin" });
     }
     const token = randomToken();
     this.db.sessions.insert({ id: token, userId: user.id, createdAt: this.iso() });
-    return { token, user, isNew };
+    return { token, user: this.publicUser(user) as unknown as User, isNew };
   }
 
   private giveDemoEvents(user: User) {
@@ -245,7 +256,7 @@ export class ToBeService {
 
   me(userId: string) {
     const u = this.requireUser(userId);
-    const orders = this.db.orders.filter((o) => o.userId === u.id && o.status === "paid");
+    const orders = this.db.orders.filter((o) => o.userId === u.id && (o.status === "paid" || o.status === "reserved"));
     const votes = this.db.votes.filter((v) => v.userId === u.id).reduce((s, v) => s + v.count, 0);
     const events = new Set(orders.map((o) => o.eventId));
     const photos = u.faceDescriptor && u.passEnabled ? this.myPhotos(u.id).reduce((s, g) => s + g.photos.length, 0) : 0;
@@ -263,16 +274,24 @@ export class ToBeService {
     return { ...rest, hasFace: !!faceDescriptor };
   }
 
-  updateMe(userId: string, patch: { name?: string }) {
+  updateMe(userId: string, patch: { name?: string; phone?: string | null }) {
     const u = this.requireUser(userId);
     const name = (patch.name ?? u.name).trim().slice(0, 60);
-    return this.publicUser(this.db.users.update(u.id, { name }));
+    let phone = u.phone;
+    if (patch.phone !== undefined) {
+      try {
+        phone = patch.phone ? normalizePhone(patch.phone) : null;
+      } catch {
+        throw new ApiError(400, "Numéro de téléphone invalide");
+      }
+    }
+    return this.publicUser(this.db.users.update(u.id, { name, phone }));
   }
 
   deleteAccount(userId: string) {
     const u = this.requireUser(userId);
     for (const s of this.db.sessions.filter((s) => s.userId === u.id)) this.db.sessions.remove(s.id);
-    this.db.users.update(u.id, { name: "Compte supprimé", faceDescriptor: null, passEnabled: false, phone: `supprime-${u.id}` });
+    this.db.users.update(u.id, { name: "Compte supprimé", faceDescriptor: null, passEnabled: false, phone: null, email: `supprime-${u.id}@tobe.invalid` });
     return { ok: true };
   }
 
@@ -280,7 +299,7 @@ export class ToBeService {
   // Événements
   // =====================================================================
   private attendees(e: TobeEvent): number {
-    return this.db.orders.filter((o) => o.eventId === e.id && o.status === "paid").reduce((s, o) => s + o.qty, 0);
+    return this.db.orders.filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved")).reduce((s, o) => s + o.qty, 0);
   }
 
   private isBoosted(e: TobeEvent): boolean {
@@ -390,8 +409,8 @@ export class ToBeService {
     if (user && user.id === e.organizerId) return true; // l'équipe ToBe (admin) n'a pas d'accès automatique aux événements privés
     if (code && e.accessCode && code.trim().toUpperCase() === e.accessCode.toUpperCase()) return true;
     if (!user) return false;
-    if (e.invitees.includes(user.phone)) return true;
-    return this.db.orders.some((o) => o.eventId === e.id && o.userId === user.id && o.status === "paid");
+    if (e.invitees.includes(user.email)) return true;
+    return this.db.orders.some((o) => o.eventId === e.id && o.userId === user.id && (o.status === "paid" || o.status === "reserved"));
   }
 
   getEvent(idOrSlug: string, userId: string | null, code?: string | null): EventView {
@@ -406,8 +425,8 @@ export class ToBeService {
     }
     const manage = this.canManage(e, user);
     // Un invité connecté qui saisit le bon code est ajouté à la liste : il n'aura plus à le retaper.
-    if (user && e.visibility === "private" && code && !e.invitees.includes(user.phone) && user.id !== e.organizerId && e.accessCode && code.trim().toUpperCase() === e.accessCode.toUpperCase()) {
-      this.db.events.update(e.id, { invitees: [...e.invitees, user.phone] });
+    if (user && e.visibility === "private" && code && !e.invitees.includes(user.email) && user.id !== e.organizerId && e.accessCode && code.trim().toUpperCase() === e.accessCode.toUpperCase()) {
+      this.db.events.update(e.id, { invitees: [...e.invitees, user.email] });
     }
     const fresh = this.db.events.get(e.id)!;
     const ev = manage ? fresh : this.db.events.update(e.id, { views: fresh.views + 1 });
@@ -420,7 +439,7 @@ export class ToBeService {
       attendees: this.attendees(ev),
       photoCount: this.db.photos.filter((p) => p.eventId === ev.id).length,
       organizerPro: !!this.db.users.get(ev.organizerId)?.pro,
-      myTickets: user ? this.db.orders.filter((o) => o.eventId === ev.id && o.userId === user.id && o.status === "paid").reduce((s, o) => s + o.qty, 0) : 0,
+      myTickets: user ? this.db.orders.filter((o) => o.eventId === ev.id && o.userId === user.id && (o.status === "paid" || o.status === "reserved")).reduce((s, o) => s + o.qty, 0) : 0,
     };
   }
 
@@ -463,7 +482,7 @@ export class ToBeService {
       accessCode: input.visibility === "private" ? (input.accessCode?.trim().toUpperCase() || randomCode(6)) : null,
       invitees: (input.invitees ?? []).map((p) => {
         try {
-          return normalizePhone(p);
+          return normalizeEmail(p);
         } catch {
           return "";
         }
@@ -471,7 +490,7 @@ export class ToBeService {
       ticketTypes,
       expectedAttendance: Math.max(1, Math.round(input.expectedAttendance || 50)),
       reach: input.reach,
-      options: input.options,
+      options: { ...input.options, cagnotte: input.options.cagnotte && this.opts.paymentsEnabled },
       liveUrl: input.liveUrl ?? null,
       boostedUntil: null,
       views: 0,
@@ -484,6 +503,7 @@ export class ToBeService {
 
     if (input.options.votes && input.contest) {
       const c = input.contest;
+      if (c.mode !== "free" && !this.opts.paymentsEnabled) c.mode = "free";
       const contest: Contest = {
         id: newId("cnt"),
         eventId: id,
@@ -499,13 +519,13 @@ export class ToBeService {
       this.db.contests.insert(contest);
       this.db.events.update(id, { contestId: contest.id });
     }
-    if (input.options.cagnotte && input.cagnotte) {
+    if (input.options.cagnotte && input.cagnotte && this.opts.paymentsEnabled) {
       const cg: Cagnotte = { id: newId("cag"), eventId: id, title: input.cagnotte.title?.trim() || title, description: input.cagnotte.description?.trim() ?? "", goal: Math.max(0, Math.round(input.cagnotte.goal || 0)), collected: 0, contributors: 0, createdAt: this.iso() };
       this.db.cagnottes.insert(cg);
       this.db.events.update(id, { cagnotteId: cg.id });
     }
     if (input.tobe) this.requestTobe(user.id, { ...input.tobe, eventId: id });
-    if (input.boost) this.buyBoost(user.id, id, input.boost.plan, input.boost.method);
+    if (input.boost && this.opts.paymentsEnabled) this.buyBoost(user.id, id, input.boost.plan, input.boost.method);
     return this.getEvent(id, user.id);
   }
 
@@ -517,7 +537,7 @@ export class ToBeService {
     const next: Partial<TobeEvent> = {};
     for (const k of allowed) if (k in patch) (next as Record<string, unknown>)[k] = (patch as Record<string, unknown>)[k];
     if (patch.startsAt) next.startsAt = new Date(patch.startsAt).toISOString();
-    if (patch.invitees) next.invitees = patch.invitees.map((p) => normalizePhone(p));
+    if (patch.invitees) next.invitees = patch.invitees.map((p) => normalizeEmail(p));
     if (patch.visibility === "private" && !e.accessCode) next.accessCode = randomCode(6);
     this.db.events.update(e.id, next);
     return this.getEvent(e.id, user.id);
@@ -535,6 +555,10 @@ export class ToBeService {
   // =====================================================================
   // Paiements (passerelle simulée — voir server/src/payments.ts pour brancher un vrai fournisseur)
   // =====================================================================
+  private requirePayments(what: string) {
+    if (!this.opts.paymentsEnabled) throw new ApiError(400, `${what} : le paiement en ligne arrive bientôt sur ToBe.`);
+  }
+
   private pay(userId: string, kind: Parameters<ToBeService["recordPayment"]>[0]["kind"], refId: string, eventId: string | null, amount: number, platformFee: number, method: PayMethod) {
     if (amount < 0) throw new ApiError(400, "Montant invalide");
     return this.recordPayment({ userId, kind, refId, eventId, amount, platformFee, method });
@@ -557,9 +581,10 @@ export class ToBeService {
     const qty = Math.round(input.qty);
     if (qty < 1 || qty > 10) throw new ApiError(400, "Entre 1 et 10 billets par commande");
     if (tt.quota && tt.sold + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold)} place(s) disponible(s)`);
-    if (tt.price > 0 && input.method === "cash") throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
+    const online = this.opts.paymentsEnabled && tt.price > 0;
+    if (online && input.method === "cash") throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
     const organizer = this.db.users.get(e.organizerId);
-    const fee = ticketFee(tt.price, !!organizer?.pro) * qty;
+    const fee = online ? ticketFee(tt.price, !!organizer?.pro) * qty : 0;
     const total = tt.price * qty + fee;
     const order: Order = {
       id: newId("ord"),
@@ -571,22 +596,22 @@ export class ToBeService {
       unitPrice: tt.price,
       fee,
       total,
-      method: tt.price > 0 ? input.method : "cash",
-      status: "paid",
+      method: online ? input.method : "cash",
+      status: online || tt.price === 0 ? "paid" : "reserved",
       code: randomCode(10),
       scannedCount: 0,
       createdAt: this.iso(),
     };
     this.db.orders.insert(order);
     this.db.events.update(e.id, (ev) => ({ ...ev, ticketTypes: ev.ticketTypes.map((t) => (t.id === tt.id ? { ...t, sold: t.sold + qty } : t)) }));
-    if (total > 0) this.pay(user.id, "ticket", order.id, e.id, total, fee, input.method);
+    if (online && total > 0) this.pay(user.id, "ticket", order.id, e.id, total, fee, input.method);
     return order;
   }
 
   myTickets(userId: string) {
     const user = this.requireUser(userId);
     return this.db.orders
-      .filter((o) => o.userId === user.id && o.status === "paid")
+      .filter((o) => o.userId === user.id && (o.status === "paid" || o.status === "reserved"))
       .map((o) => {
         const e = this.db.events.get(o.eventId);
         return { ...o, event: e ? this.toCard(e) : null };
@@ -599,7 +624,7 @@ export class ToBeService {
     const o = this.db.orders.get(orderId);
     if (!o || (o.userId !== user.id && user.role !== "admin")) throw new ApiError(404, "Billet introuvable");
     const e = this.db.events.get(o.eventId);
-    return { ...o, event: e ? this.toCard(e) : null, holder: user.name || user.phone };
+    return { ...o, event: e ? this.toCard(e) : null, holder: user.name || user.email };
   }
 
   scanTicket(userId: string, rawCode: string, eventId?: string) {
@@ -613,7 +638,7 @@ export class ToBeService {
     if (o.scannedCount >= o.qty) return { ok: false as const, reason: "Billet déjà utilisé", order: o };
     const next = this.db.orders.update(o.id, { scannedCount: o.scannedCount + 1 });
     const holder = this.db.users.get(o.userId);
-    return { ok: true as const, order: next, holder: holder?.name || holder?.phone || "", remaining: next.qty - next.scannedCount, eventTitle: e.title };
+    return { ok: true as const, order: next, holder: holder?.name || holder?.email || "", amountDue: next.status === "reserved" ? next.total : 0, remaining: next.qty - next.scannedCount, eventTitle: e.title };
   }
 
   // =====================================================================
@@ -686,6 +711,7 @@ export class ToBeService {
         throw new ApiError(400, "Vous avez déjà utilisé votre vote gratuit aujourd'hui");
     } else {
       if (c.mode === "free") throw new ApiError(400, "Ce concours n'a que des votes gratuits");
+      this.requirePayments("Votes payants");
       if (!input.method || input.method === "cash") throw new ApiError(400, "Choisissez un moyen de paiement");
       const p = votePackPrice(c.votePrice, input.pack);
       count = p.votes;
@@ -747,7 +773,7 @@ export class ToBeService {
       transactions: votes.length,
       fingerprint: fingerprint(votes.map((v) => `${v.id}|${v.candidateId}|${v.count}|${v.createdAt}`).join(";") + `#${c.id}`),
       rules: [
-        "Un compte par numéro de téléphone vérifié par SMS.",
+        "Un compte par adresse e-mail vérifiée par code.",
         c.mode !== "paid" ? "Un vote gratuit par compte et par jour." : "Votes uniquement payants, enregistrés avec leur transaction.",
         "Aucun vote accepté après la clôture.",
         c.juryWeight > 0 ? `Résultat final : ${100 - c.juryWeight} % public, ${c.juryWeight} % jury.` : "Résultat final : 100 % vote du public.",
@@ -778,6 +804,7 @@ export class ToBeService {
     if (!cg) throw new ApiError(404, "Cagnotte introuvable");
     const e = this.db.events.get(cg.eventId);
     if (e && !this.canView(e, user, input.code)) throw new ApiError(403, "Cagnotte réservée aux invités");
+    this.requirePayments("Contributions");
     const amount = Math.round(input.amount);
     if (!(amount >= 500)) throw new ApiError(400, "Contribution minimale : 500 FCFA");
     if (input.method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
@@ -918,6 +945,7 @@ export class ToBeService {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!this.canManage(e, user)) throw new ApiError(403, "Réservé à l'organisateur");
+    this.requirePayments("Boost");
     const p = PRICING.boosts[plan];
     if (!p) throw new ApiError(400, "Formule inconnue");
     if (method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
@@ -930,6 +958,7 @@ export class ToBeService {
 
   subscribe(userId: string, plan: "premium" | "pro", method: PayMethod) {
     const user = this.requireUser(userId);
+    this.requirePayments("Abonnements");
     if (method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
     if (plan === "premium") {
       const base = user.premiumUntil && new Date(user.premiumUntil) > this.now() ? new Date(user.premiumUntil) : this.now();
@@ -947,7 +976,7 @@ export class ToBeService {
     const user = this.requireUser(userId);
     const events = this.db.events.filter((e) => e.organizerId === user.id).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
     const rows = events.map((e) => {
-      const orders = this.db.orders.filter((o) => o.eventId === e.id && o.status === "paid");
+      const orders = this.db.orders.filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved"));
       const sold = orders.reduce((s, o) => s + o.qty, 0);
       const ticketRevenue = orders.reduce((s, o) => s + o.unitPrice * o.qty, 0);
       const scanned = orders.reduce((s, o) => s + o.scannedCount, 0);
@@ -989,20 +1018,67 @@ export class ToBeService {
   // Prestataires et demandes à l'agence ToBe
   // =====================================================================
   listProviders(filters: { category?: string; q?: string } = {}): Provider[] {
-    let list = this.db.providers.all();
+    let list = this.db.providers.filter((p) => p.status === "approved");
     if (filters.category && filters.category !== "all") list = list.filter((p) => p.category === filters.category);
     if (filters.q) {
       const q = slugify(filters.q);
       list = list.filter((p) => slugify(`${p.name} ${p.bio} ${p.city}`).includes(q));
     }
-    return list.sort((a, b) => Number(b.certified) - Number(a.certified) || b.rating - a.rating);
+    return list.sort((a, b) => Number(b.certified) - Number(a.certified) || b.rating - a.rating || a.name.localeCompare(b.name));
+  }
+
+  /** Un professionnel demande à figurer dans l'annuaire ; l'équipe ToBe valide. */
+  applyProvider(userId: string, input: { name: string; category: Provider["category"]; city?: string; bio: string; phone: string; priceFrom?: number }) {
+    const user = this.requireUser(userId);
+    if (!input.name?.trim() || input.name.trim().length < 2) throw new ApiError(400, "Nom de l'activité requis");
+    if (!input.bio?.trim() || input.bio.trim().length < 20) throw new ApiError(400, "Décrivez votre activité en quelques phrases (20 caractères minimum)");
+    const cats: Provider["category"][] = ["mc", "deco", "son", "photo", "traiteur", "securite", "costume", "logistique"];
+    if (!cats.includes(input.category)) throw new ApiError(400, "Catégorie inconnue");
+    let phone: string;
+    try {
+      phone = normalizePhone(input.phone);
+    } catch {
+      throw new ApiError(400, "Numéro de téléphone invalide");
+    }
+    const existing = this.db.providers.find((p) => p.ownerId === user.id);
+    const data = {
+      name: input.name.trim().slice(0, 80),
+      category: input.category,
+      city: input.city?.trim() || "Lomé",
+      bio: input.bio.trim().slice(0, 600),
+      phone,
+      email: user.email,
+      priceFrom: Math.max(0, Math.round(input.priceFrom ?? 0)),
+    };
+    const p = existing
+      ? this.db.providers.update(existing.id, { ...data, status: existing.status === "approved" ? "approved" : "pending" })
+      : this.db.providers.insert({ id: newId("prv"), ownerId: user.id, status: "pending", rating: 0, reviews: 0, certified: false, theme: "nuit", ...data });
+    if (!existing) for (const a of this.db.users.filter((u) => u.role === "admin" && u.id !== user.id)) this.notify(a.id, "Nouveau prestataire à valider", p.name, "/tobe");
+    return p;
+  }
+
+  myProvider(userId: string) {
+    const user = this.requireUser(userId);
+    return this.db.providers.find((p) => p.ownerId === user.id) ?? null;
+  }
+
+  setProviderStatus(userId: string, id: string, patch: { status?: Provider["status"]; certified?: boolean }) {
+    this.requireAdmin(userId);
+    const p = this.db.providers.get(id);
+    if (!p) throw new ApiError(404, "Prestataire introuvable");
+    const next = this.db.providers.update(id, { status: patch.status ?? p.status, certified: patch.certified ?? p.certified });
+    if (p.ownerId && patch.status && patch.status !== p.status) {
+      this.notify(p.ownerId, patch.status === "approved" ? "Votre fiche prestataire est en ligne" : "Votre fiche prestataire n'a pas été retenue", next.name, "/prestataires");
+    }
+    return next;
   }
 
   requestQuote(userId: string, providerId: string, input: { message: string; date?: string | null }) {
     const user = this.requireUser(userId);
     const p = this.db.providers.get(providerId);
-    if (!p) throw new ApiError(404, "Prestataire introuvable");
+    if (!p || p.status !== "approved") throw new ApiError(404, "Prestataire introuvable");
     if (!input.message?.trim()) throw new ApiError(400, "Décrivez votre besoin");
+    if (p.ownerId) this.notify(p.ownerId, "Nouvelle demande de devis", `${user.name || user.email} : ${input.message.trim().slice(0, 80)}`, "/profil");
     return this.db.quotes.insert({ id: newId("quo"), providerId: p.id, userId: user.id, message: input.message.trim(), date: input.date ?? null, createdAt: this.iso() });
   }
 
@@ -1010,6 +1086,14 @@ export class ToBeService {
     const user = this.requireUser(userId);
     const e = input.eventId ? this.findEvent(input.eventId) : null;
     if (e && !this.canManage(e, user)) throw new ApiError(403, "Réservé à l'organisateur");
+    if (!input.phone && !user.phone) throw new ApiError(400, "Indiquez un numéro pour que l'équipe ToBe vous rappelle");
+    if (input.phone && !user.phone) {
+      try {
+        this.db.users.update(user.id, { phone: normalizePhone(input.phone) });
+      } catch {
+        /* vérifié plus bas */
+      }
+    }
     const req = this.db.tobeRequests.insert({
       id: newId("tbr"),
       eventId: e?.id ?? null,
@@ -1018,7 +1102,14 @@ export class ToBeService {
       services: input.services ?? [],
       budget: input.budget?.trim() ?? "",
       note: input.note?.trim() ?? "",
-      phone: input.phone ? normalizePhone(input.phone) : user.phone,
+      phone: (() => {
+        try {
+          return input.phone ? normalizePhone(input.phone) : (user.phone ?? "");
+        } catch {
+          throw new ApiError(400, "Numéro de téléphone invalide");
+        }
+      })(),
+      email: user.email,
       name: user.name,
       eventTitle: e?.title ?? input.eventTitle?.trim() ?? "",
       status: "nouveau",
@@ -1026,7 +1117,7 @@ export class ToBeService {
     });
     if (e) this.db.events.update(e.id, { tobeRequestId: req.id });
     for (const a of this.db.users.filter((u) => u.role === "admin" && u.id !== user.id)) {
-      this.notify(a.id, "Nouvelle demande d'organisation", `${user.name || user.phone} — ${req.eventTitle || "projet"}`, "/tobe");
+      this.notify(a.id, "Nouvelle demande d'organisation", `${user.name || user.email} — ${req.eventTitle || "projet"}`, "/tobe");
     }
     return req;
   }
@@ -1053,16 +1144,19 @@ export class ToBeService {
       revenue[p.kind].platform += p.platformFee;
       revenue[p.kind].count += 1;
     }
+    const providers = this.db.providers.all().sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1) || a.name.localeCompare(b.name));
     return {
       requests,
+      providers,
       revenue,
       platformTotal: Object.values(revenue).reduce((s, r) => s + r.platform, 0),
       counts: {
         users: this.db.users.size,
         events: this.db.events.size,
-        tickets: this.db.orders.filter((o) => o.status === "paid").reduce((s, o) => s + o.qty, 0),
+        tickets: this.db.orders.filter((o) => (o.status === "paid" || o.status === "reserved")).reduce((s, o) => s + o.qty, 0),
         photos: this.db.photos.size,
         passUsers: this.db.users.filter((u) => u.passEnabled).length,
+        providers: this.db.providers.filter((p) => p.status === "approved").length,
         quotes: this.db.quotes.size,
       },
     };

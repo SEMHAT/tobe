@@ -1,12 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm ci",
-  "buildCommand": "npm run build:demo",
+  "buildCommand": "npm run build:vercel",
   "outputDirectory": "dist",
   "framework": null,
+  "functions": {
+    "api/handler.ts": {
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
     {
-      "source": "/((?!assets/|models/|.*\\..*).*)",
+      "source": "/api/:path*",
+      "destination": "/api/handler?p=:path*"
+    },
+    {
+      "source": "/((?!api/|assets/|models/|.*\\..*).*)",
       "destination": "/index.html"
     }
   ],

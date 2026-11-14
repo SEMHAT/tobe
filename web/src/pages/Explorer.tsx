@@ -1,8 +1,8 @@
 import type { EventCard } from "@tobe/core";
 import { List, Map as MapIcon, Search, SearchX, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { eventPath, RowCard, SkeletonRows } from "../components/events";
+import { Link, useSearchParams } from "react-router-dom";
+import { eventPath, RowCard, SkeletonRows, TileCard } from "../components/events";
 import { EventMap } from "../components/Map";
 import { Chip, Empty, ErrorState, Segmented, inputCls } from "../components/ui";
 import { CategoryIcon } from "../components/visual";
@@ -47,8 +47,8 @@ export function Explorer() {
 
   return (
     <div className="pt-safe">
-      <div className="sticky top-0 z-20 bg-app/90 px-5 pb-3 pt-4 backdrop-blur-xl">
-        <h1 className="text-[26px] font-extrabold">Explorer</h1>
+      <div className="sticky top-0 z-20 bg-app/90 px-5 pb-3 pt-4 backdrop-blur-xl lg:top-16 lg:px-0">
+        <h1 className="text-[26px] font-extrabold lg:text-[34px]">Explorer</h1>
         <form
           className="relative mt-3"
           onSubmit={(e) => {
@@ -77,7 +77,7 @@ export function Explorer() {
               {l}
             </Chip>
           ))}
-          <span className="mx-1 w-px shrink-0 bg-white/10" />
+          <span className="mx-1 w-px shrink-0 bg-ink/10" />
           {[
             ["free", "Gratuit"],
             ["paid", "Payant"],
@@ -95,7 +95,7 @@ export function Explorer() {
             onClick={() => setView(view === "list" ? "map" : "list")}
             className="flex h-11 items-center gap-1.5 rounded-full border border-line bg-card px-4 text-sm font-semibold"
           >
-            {view === "list" ? <MapIcon className="size-4 text-gold" /> : <List className="size-4 text-gold" />}
+            {view === "list" ? <MapIcon className="size-4 text-brand" /> : <List className="size-4 text-brand" />}
             {view === "list" ? "Carte" : "Liste"}
           </button>
         </div>
@@ -103,18 +103,32 @@ export function Explorer() {
 
       {loading && <SkeletonRows />}
       {error && <ErrorState message={error.message} onRetry={reload} />}
-      {data && data.length === 0 && <Empty icon={<SearchX className="size-7" />} title="Aucun événement trouvé" text="Essayez une autre date, une autre catégorie ou un autre mot." />}
+      {data && data.length === 0 && (
+        <Empty
+          icon={<SearchX className="size-7" />}
+          title="Aucun événement trouvé"
+          text={params.toString() ? "Essayez une autre date, une autre catégorie ou un autre mot." : "Aucun événement publié pour l'instant. Le vôtre peut être le premier."}
+          action={<Link to="/creer" className="font-semibold text-brand">Créer un événement</Link>}
+        />
+      )}
       {data && data.length > 0 && view === "list" && (
-        <div className="space-y-3 px-5 pb-6">
-          <div className="text-sm text-muted">{data.length} événement{data.length > 1 ? "s" : ""}</div>
-          {data.map((e) => (
-            <RowCard key={e.id} e={e} />
-          ))}
+        <div className="px-5 pb-6 lg:px-0">
+          <div className="mb-3 text-sm text-muted">{data.length} événement{data.length > 1 ? "s" : ""}</div>
+          <div className="space-y-3 lg:hidden">
+            {data.map((e) => (
+              <RowCard key={e.id} e={e} />
+            ))}
+          </div>
+          <div className="hidden grid-cols-4 gap-6 lg:grid">
+            {data.map((e) => (
+              <TileCard key={e.id} e={e} wide />
+            ))}
+          </div>
         </div>
       )}
       {data && data.length > 0 && view === "map" && (
-        <div className="px-5 pb-6">
-          <EventMap points={points} height={460} />
+        <div className="px-5 pb-6 lg:px-0">
+          <EventMap points={points} height={typeof window !== "undefined" && window.innerWidth >= 1024 ? 620 : 460} />
           {points.length < data.length && <p className="mt-2 text-xs text-faint">{data.length - points.length} événement(s) sans position sur la carte.</p>}
         </div>
       )}

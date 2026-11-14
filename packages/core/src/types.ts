@@ -18,11 +18,12 @@ export type Access = "free" | "paid" | "invite";
 export type Reach = "quartier" | "ville" | "national" | "international";
 export type ImpactTier = "local" | "ville" | "majeur" | "phare";
 export type PayMethod = "mixx" | "moov" | "card" | "cash";
-export type Theme = "or" | "corail" | "nuit" | "vert" | "violet" | "sobre";
+export type Theme = "roi" | "or" | "corail" | "nuit" | "vert" | "violet" | "sobre";
 
 export interface User {
   id: string;
-  phone: string;
+  email: string;
+  phone: string | null;
   name: string;
   createdAt: string;
   role: "user" | "admin";
@@ -40,7 +41,7 @@ export interface Session {
 }
 
 export interface Otp {
-  id: string; // numéro de téléphone normalisé
+  id: string; // adresse e-mail normalisée
   code: string;
   expiresAt: string;
   attempts: number;
@@ -81,7 +82,7 @@ export interface TobeEvent {
   visibility: Visibility;
   access: Access;
   accessCode: string | null;
-  invitees: string[]; // numéros autorisés pour un événement privé
+  invitees: string[]; // e-mails autorisés pour un événement privé
   ticketTypes: TicketType[];
   expectedAttendance: number;
   reach: Reach;
@@ -107,7 +108,8 @@ export interface Order {
   fee: number;
   total: number;
   method: PayMethod;
-  status: "paid" | "pending" | "failed";
+  /** paid : payé en ligne · reserved : place réservée, à régler à l'entrée */
+  status: "paid" | "reserved" | "pending" | "failed";
   code: string;
   scannedCount: number;
   createdAt: string;
@@ -185,6 +187,9 @@ export interface Photo {
 
 export interface Provider {
   id: string;
+  ownerId: string | null;
+  status: "pending" | "approved" | "rejected";
+  email: string;
   name: string;
   category: "mc" | "deco" | "son" | "photo" | "traiteur" | "securite" | "costume" | "logistique";
   city: string;
@@ -215,6 +220,7 @@ export interface TobeRequest {
   budget: string;
   note: string;
   phone: string;
+  email: string;
   name: string;
   eventTitle: string;
   status: "nouveau" | "contacte" | "devis" | "signe" | "perdu";

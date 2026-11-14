@@ -16,7 +16,7 @@ export function PayPicker({ value, onChange }: { value: PayMethod; onChange: (m:
           key={m.id}
           type="button"
           onClick={() => onChange(m.id)}
-          className={cx("flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition", value === m.id ? "border-gold bg-gold/10" : "border-line bg-card")}
+          className={cx("flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition", value === m.id ? "border-brand bg-brand/10" : "border-line bg-card")}
         >
           <span className="grid size-10 place-items-center rounded-xl text-[#16141c]" style={{ background: m.color }}>
             {m.id === "card" ? <CreditCard className="size-5 text-white" /> : <Smartphone className="size-5" />}
@@ -25,10 +25,9 @@ export function PayPicker({ value, onChange }: { value: PayMethod; onChange: (m:
             <span className="block text-[15px] font-semibold">{m.label}</span>
             <span className="block text-xs text-muted">{m.sub}</span>
           </span>
-          <span className={cx("size-5 rounded-full border-2", value === m.id ? "border-gold bg-gold shadow-[inset_0_0_0_3px_var(--bg-2)]" : "border-white/25")} />
+          <span className={cx("size-5 rounded-full border-2", value === m.id ? "border-brand bg-brand shadow-[inset_0_0_0_3px_var(--bg-2)]" : "border-ink/25")} />
         </button>
       ))}
-      <p className="pt-1 text-center text-xs text-faint">Paiement simulé dans cette version : aucun montant n'est débité.</p>
     </div>
   );
 }

@@ -71,9 +71,14 @@ export async function api<T = any>(method: "GET" | "POST" | "PATCH" | "DELETE", 
 /** Envoie une image (déjà redimensionnée) et renvoie son adresse. */
 export async function uploadImage(blob: Blob, name = "image.jpg"): Promise<string> {
   if (isDemo) return putMedia(blob);
-  const form = new FormData();
-  form.append("file", blob, name);
-  const res = await fetch(`${API_URL}/api/uploads`, { method: "POST", body: form, headers: token ? { authorization: `Bearer ${token}` } : {} });
+  void name;
+  const type = ["image/jpeg", "image/png", "image/webp"].includes(blob.type) ? blob.type : "image/jpeg";
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/api/uploads`, { method: "POST", body: blob, headers: { "content-type": type, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
+  } catch {
+    throw new HttpError(0, "Pas de connexion internet. Vérifiez votre réseau et réessayez.");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new HttpError(res.status, data.error ?? "Échec de l'envoi");
   return data.url as string;

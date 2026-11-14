@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@custom-variant light (&:where(.light, .light *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --color-app: var(--bg);
@@ -15,10 +15,12 @@
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Rubik", "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  --color-gold: #f2b233;
-  --color-gold-2: #ffcf6b;
+  /* Charte ToBe : bleu roi du logo, noir, blanc */
+  --color-brand: #1800ad;
+  --color-brand-2: #4f3dff;
+  --color-brand-soft: #eceafc;
   --color-coral: #ff5a4e;
   --color-violet: #8b5cf6;
   --color-emerald: #22c58b;
@@ -26,28 +28,28 @@
   --radius-card: 18px;
 }
 
-/* Thème sombre (par défaut) et clair, via variables. */
+/* Thème clair (par défaut, comme le logo) et sombre, via variables. */
 :root {
-  --bg: #0e0e12;
-  --bg-2: #15151b;
-  --card: #1a1a22;
-  --card-2: #23232d;
-  --line: rgba(255, 255, 255, 0.08);
-  --text: #f6f1e9;
-  --muted: #a7a3ad;
-  --faint: #6f6b78;
-  color-scheme: dark;
-}
-.light {
-  --bg: #f7f4ee;
-  --bg-2: #efebe3;
+  --bg: #ffffff;
+  --bg-2: #f6f6fa;
   --card: #ffffff;
-  --card-2: #f3efe7;
-  --line: rgba(20, 18, 30, 0.09);
-  --text: #16141c;
-  --muted: #5d5966;
-  --faint: #8d8996;
+  --card-2: #f2f2f7;
+  --line: rgba(11, 11, 18, 0.1);
+  --text: #0b0b12;
+  --muted: #55535f;
+  --faint: #8a8896;
   color-scheme: light;
+}
+.dark {
+  --bg: #0b0b12;
+  --bg-2: #13131c;
+  --card: #171722;
+  --card-2: #20202d;
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #f4f4fa;
+  --muted: #a5a3b3;
+  --faint: #6f6c80;
+  color-scheme: dark;
 }
 
 @utility pt-safe {
@@ -62,13 +64,17 @@
     display: none;
   }
 }
-@utility gold-gradient {
-  background-image: linear-gradient(135deg, #ffd27a 0%, #f2b233 45%, #e8891c 100%);
+@utility brand-gradient {
+  background-image: linear-gradient(135deg, #3f2cff 0%, #1800ad 55%, #0f0078 100%);
+}
+@utility outline-title {
+  -webkit-text-stroke: 2px currentColor;
+  color: transparent;
 }
 
 html,
 body {
-  background: #060608;
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -82,7 +88,7 @@ h2,
 h3,
 .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
 }
 button {
   cursor: pointer;

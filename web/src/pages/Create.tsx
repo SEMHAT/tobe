@@ -42,7 +42,7 @@ function defaultDate(days: number, h: number) {
 
 export function Create() {
   const nav = useNavigate();
-  const { requireAuth, toast, refresh } = useSession();
+  const { me, requireAuth, toast, refresh, payments } = useSession();
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<EventView | null>(null);
@@ -58,7 +58,7 @@ export function Create() {
   const [city, setCity] = useState("Lomé");
   const [description, setDescription] = useState("");
   const [cover, setCover] = useState<string | null>(null);
-  const [theme, setTheme] = useState<Theme>("or");
+  const [theme, setTheme] = useState<Theme>("roi");
   const [geo, setGeo] = useState<{ lat: number; lng: number } | null>(null);
   const [uploading, setUploading] = useState(false);
   // Étape 2
@@ -94,6 +94,7 @@ export function Create() {
   const [services, setServices] = useState<string[]>([]);
   const [budget, setBudget] = useState("");
   const [note, setNote] = useState("");
+  const [tobePhone, setTobePhone] = useState("");
 
   const impact = useMemo(() => computeImpact({ expectedAttendance: expected, reach, category, views: 0, ticketTypes: [] }), [expected, reach, category]);
 
@@ -102,7 +103,7 @@ export function Create() {
     true,
     access !== "paid" || tickets.some((t) => t.name.trim() && t.price > 0),
     (!votes || candidates.filter((c) => c.name.trim()).length >= 2) && (!cagnotte || cagGoal >= 0),
-    tobe !== "carte" || services.length > 0,
+    (tobe !== "carte" || services.length > 0) && (!tobe || !!me?.user.phone || tobePhone.replace(/\D/g, "").length >= 8),
   ];
 
   const onCover = async (f?: File) => {
@@ -129,7 +130,7 @@ export function Create() {
 
   const publish = async (payMethod?: PayMethod) => {
     if (!(await requireAuth("Connectez-vous pour publier votre événement."))) return;
-    if (boost && !payMethod) return setPayOpen(true);
+    if (boost && payments && !payMethod) return setPayOpen(true);
     setBusy(true);
     try {
       const ev = await api<EventView>("POST", "/events", {
@@ -153,9 +154,9 @@ export function Create() {
         reach,
         options: { votes, cagnotte, gallery, live },
         liveUrl: live && liveUrl ? liveUrl : null,
-        contest: votes ? { mode: voteMode, votePrice, closesAt: new Date(voteClose).toISOString(), results: voteResults, juryWeight: jury, candidates: candidates.filter((c) => c.name.trim()) } : null,
+        contest: votes ? { mode: payments ? voteMode : "free", votePrice, closesAt: new Date(voteClose).toISOString(), results: voteResults, juryWeight: jury, candidates: candidates.filter((c) => c.name.trim()) } : null,
         cagnotte: cagnotte ? { title: cagTitle || `Cagnotte — ${title}`, goal: cagGoal } : null,
-        tobe: tobe ? { level: tobe, services, budget, note } : null,
+        tobe: tobe ? { level: tobe, services, budget, note, phone: tobePhone || undefined } : null,
         boost: boost && payMethod ? { plan: boost, method: payMethod } : null,
       });
       setPayOpen(false);
@@ -175,14 +176,14 @@ export function Create() {
       <div className="px-5 pt-3">
         <div className="flex gap-1.5">
           {STEPS.map((s, i) => (
-            <div key={s} className={cx("h-1.5 flex-1 rounded-full transition", i <= step ? "bg-gold" : "bg-white/10")} />
+            <div key={s} className={cx("h-1.5 flex-1 rounded-full transition", i <= step ? "bg-brand" : "bg-ink/10")} />
           ))}
         </div>
         <div className="mt-2 flex justify-between text-xs font-semibold text-muted">
           <span>
             Étape {step + 1} sur {STEPS.length}
           </span>
-          <span className="text-gold">{STEPS[step]}</span>
+          <span className="text-brand">{STEPS[step]}</span>
         </div>
       </div>
 
@@ -218,7 +219,7 @@ export function Create() {
             <Field label="Catégorie">
               <div className="flex flex-wrap gap-2">
                 {CATEGORIES.map((c) => (
-                  <button key={c} onClick={() => setCategory(c)} className={cx("flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium", category === c ? "border-gold bg-gold text-[#1b1206]" : "border-line bg-card")}>
+                  <button key={c} onClick={() => setCategory(c)} className={cx("flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium", category === c ? "border-brand bg-brand text-white" : "border-line bg-card")}>
                     <CategoryIcon category={c} className="size-4" /> {CATEGORY_LABELS[c]}
                   </button>
                 ))}
@@ -262,8 +263,8 @@ export function Create() {
                 <Field label="Code d'accès" hint="Laissez vide pour en générer un automatiquement.">
                   <input className={`${inputCls} uppercase`} placeholder="Ex. AFI2026" value={accessCode} onChange={(e) => setAccessCode(e.target.value.toUpperCase().replace(/\s/g, ""))} />
                 </Field>
-                <Field label="Numéros des invités (facultatif)" hint="Un par ligne. Ces personnes accèdent sans code une fois connectées.">
-                  <textarea className={`${inputCls} min-h-24`} placeholder={"90 12 34 56\n91 23 45 67"} value={invitees} onChange={(e) => setInvitees(e.target.value)} />
+                <Field label="E-mails des invités (facultatif)" hint="Un par ligne. Ces personnes accèdent sans code une fois connectées.">
+                  <textarea className={`${inputCls} min-h-24`} placeholder={"ama@exemple.com\nkossi@exemple.com"} value={invitees} onChange={(e) => setInvitees(e.target.value)} />
                 </Field>
               </div>
             )}
@@ -298,7 +299,7 @@ export function Create() {
                 <Button variant="outline" full icon={<Plus className="size-4" />} onClick={() => setTickets([...tickets, { name: "", price: 10000, quota: 0 }])}>
                   Ajouter un type de billet
                 </Button>
-                <p className="text-xs text-faint">Les participants paient des frais de service de 6 % en plus du prix. Vous recevez 100 % du prix du billet.</p>
+                <p className="text-xs text-faint">{payments ? "Les participants paient des frais de service de 6 % en plus du prix. Vous recevez 100 % du prix du billet." : "Les participants réservent en ligne et paient à l'entrée, sur présentation de leur QR code. Le paiement Mobile Money arrive bientôt."}</p>
               </div>
             ) : (
               <Field label="Nombre de places (0 = illimité)">
@@ -313,7 +314,7 @@ export function Create() {
               <p className="mt-1 text-xs text-muted">Sert au classement par impact : les événements « Majeur » et « Phare » sont mis en avant.</p>
               <div className="mt-4">
                 <Field label={`Participants attendus : ${expected.toLocaleString("fr-FR")}`}>
-                  <input type="range" min={10} max={5000} step={10} value={expected} onChange={(e) => setExpected(Number(e.target.value))} className="w-full accent-[#f2b233]" />
+                  <input type="range" min={10} max={5000} step={10} value={expected} onChange={(e) => setExpected(Number(e.target.value))} className="w-full accent-[#1800ad]" />
                 </Field>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -325,7 +326,7 @@ export function Create() {
                     ["international", "International"],
                   ] as [Reach, string][]
                 ).map(([v, l]) => (
-                  <button key={v} onClick={() => setReach(v)} className={cx("h-10 rounded-xl border text-sm font-semibold", reach === v ? "border-gold bg-gold/15 text-gold" : "border-line")}>
+                  <button key={v} onClick={() => setReach(v)} className={cx("h-10 rounded-xl border text-sm font-semibold", reach === v ? "border-brand bg-brand/15 text-brand" : "border-line")}>
                     {l}
                   </button>
                 ))}
@@ -338,13 +339,17 @@ export function Create() {
           <>
             <OptionCard icon={<Crown />} title="Votes" text="Concours, awards, élection du public." on={votes} onChange={setVotes}>
               <div className="space-y-4">
-                <Segmented value={voteMode} onChange={setVoteMode} options={[{ value: "free", label: "Gratuit" }, { value: "mixed", label: "Mixte" }, { value: "paid", label: "Payant" }]} />
-                <p className="text-xs text-muted">
+                {payments ? (
+                  <Segmented value={voteMode} onChange={setVoteMode} options={[{ value: "free", label: "Gratuit" }, { value: "mixed", label: "Mixte" }, { value: "paid", label: "Payant" }]} />
+                ) : (
+                  <p className="rounded-xl bg-card-2 px-3 py-2.5 text-xs text-muted">Votes gratuits : 1 vote par personne et par jour. Les votes payants arrivent bientôt.</p>
+                )}
+                {payments && <p className="text-xs text-muted">
                   {voteMode === "free" && "1 vote gratuit par personne et par jour."}
                   {voteMode === "mixed" && "1 vote gratuit par jour, plus des packs payants pour soutenir davantage."}
                   {voteMode === "paid" && "Uniquement des votes payants."} {voteMode !== "free" && `Vous recevez ${100 - PRICING.voteCommission * 100} % des votes payants.`}
-                </p>
-                {voteMode !== "free" && (
+                </p>}
+                {payments && voteMode !== "free" && (
                   <Field label="Prix d'un vote (FCFA)" hint={`Packs proposés : 10 votes pour ${formatFcfa(votePrice * 9)}, 50 votes pour ${formatFcfa(votePrice * 40)}.`}>
                     <input type="number" min={25} step={25} className={inputCls} value={votePrice} onChange={(e) => setVotePrice(Number(e.target.value))} />
                   </Field>
@@ -356,7 +361,7 @@ export function Create() {
                   <Segmented value={voteResults} onChange={setVoteResults} options={[{ value: "live", label: "En direct" }, { value: "top3", label: "Top 3" }, { value: "hidden", label: "À la fin" }]} />
                 </Field>
                 <Field label={`Part du jury : ${jury} %`} hint={jury ? `Résultat final : ${100 - jury} % public, ${jury} % jury.` : "Résultat 100 % vote du public."}>
-                  <input type="range" min={0} max={80} step={10} value={jury} onChange={(e) => setJury(Number(e.target.value))} className="w-full accent-[#f2b233]" />
+                  <input type="range" min={0} max={80} step={10} value={jury} onChange={(e) => setJury(Number(e.target.value))} className="w-full accent-[#1800ad]" />
                 </Field>
                 <div>
                   <div className="mb-2 text-[13px] font-semibold text-muted">Candidats</div>
@@ -371,7 +376,8 @@ export function Create() {
                 </div>
               </div>
             </OptionCard>
-            <OptionCard icon={<HandCoins />} title="Cagnotte" text="Contributions en Mobile Money, ouvertes à la diaspora par carte." on={cagnotte} onChange={setCagnotte}>
+            {!payments && <SoonCard icon={<HandCoins />} title="Cagnotte" text="Contributions en Mobile Money et par carte : bientôt disponible." />}
+            {payments && <OptionCard icon={<HandCoins />} title="Cagnotte" text="Contributions en Mobile Money, ouvertes à la diaspora par carte." on={cagnotte} onChange={setCagnotte}>
               <div className="space-y-3">
                 <Field label="Titre">
                   <input className={inputCls} placeholder={`Cagnotte — ${title || "mon événement"}`} value={cagTitle} onChange={(e) => setCagTitle(e.target.value)} />
@@ -381,45 +387,45 @@ export function Create() {
                 </Field>
                 <p className="text-xs text-faint">Frais ToBe : {PRICING.cagnotteCommission * 100} % des montants collectés.</p>
               </div>
-            </OptionCard>
+            </OptionCard>}
             <OptionCard icon={<Camera />} title="Galerie photo avec reconnaissance faciale" text="Chaque participant retrouve ses photos grâce à son visage." on={gallery} onChange={setGallery} />
             <OptionCard icon={<Radio />} title="Direct vidéo" text="Pour la famille et la diaspora qui ne peuvent pas venir." on={live} onChange={setLive}>
               <Field label="Lien du direct (facultatif)" hint="YouTube, Facebook… Vous pourrez l'ajouter plus tard.">
                 <input className={inputCls} placeholder="https://" value={liveUrl} onChange={(e) => setLiveUrl(e.target.value)} />
               </Field>
             </OptionCard>
-            <div className="rounded-2xl border border-gold/30 bg-gradient-to-br from-gold/10 to-transparent p-4">
+            {payments && <div className="rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/10 to-transparent p-4">
               <div className="flex items-center gap-2 font-semibold">
-                <Rocket className="size-5 text-gold" /> Booster la visibilité
+                <Rocket className="size-5 text-brand" /> Booster la visibilité
               </div>
               <p className="mt-1 text-xs text-muted">Votre événement passe en tête de l'accueil et d'Explorer.</p>
               <div className="mt-3 space-y-2">
                 {(Object.entries(PRICING.boosts) as [BoostPlan, (typeof PRICING.boosts)[BoostPlan]][]).map(([k, b]) => (
-                  <button key={k} onClick={() => setBoost(boost === k ? "" : k)} className={cx("flex w-full items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm", boost === k ? "border-gold bg-gold/10" : "border-line bg-card")}>
+                  <button key={k} onClick={() => setBoost(boost === k ? "" : k)} className={cx("flex w-full items-center justify-between rounded-xl border px-3.5 py-3 text-left text-sm", boost === k ? "border-brand bg-brand/10" : "border-line bg-card")}>
                     <span className="font-semibold">{b.label}</span>
-                    <span className="font-display font-bold text-gold">{formatFcfa(b.price)}</span>
+                    <span className="font-display font-bold text-brand">{formatFcfa(b.price)}</span>
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
           </>
         )}
 
         {step === 4 && (
           <>
-            <div className="relative overflow-hidden rounded-[24px] border border-gold/40 bg-gradient-to-br from-[#2b1f08] to-[#121014] p-5 text-white">
-              <div className="absolute -right-12 -top-12 size-44 rounded-full bg-gold/25 blur-3xl" />
-              <Sparkles className="size-8 text-gold" />
+            <div className="relative overflow-hidden rounded-[24px] border border-brand/40 bg-gradient-to-br from-[#120a4a] to-[#0b0b12] p-5 text-white">
+              <div className="absolute -right-12 -top-12 size-44 rounded-full bg-brand/25 blur-3xl" />
+              <Sparkles className="size-8 text-brand" />
               <h2 className="mt-3 text-[22px] font-extrabold leading-tight">Confier l'organisation à ToBe ?</h2>
               <p className="mt-2 text-sm text-white/70">Un seul interlocuteur. Une équipe rodée de MC, décorateurs, techniciens, photographes et communicants. Vous continuez vos activités, on donne vie à votre idée.</p>
-              <p className="mt-3 text-sm font-semibold text-gold">Un conseiller vous rappelle sous 24 h.</p>
+              <p className="mt-3 text-sm font-semibold text-brand">Un conseiller vous rappelle sous 24 h.</p>
             </div>
             <BigChoice active={tobe === "complete"} onClick={() => setTobe("complete")} icon={<Crown />} title="Organisation complète" text="ToBe prend tout en charge, de la conception au bilan." />
             <BigChoice active={tobe === "carte"} onClick={() => setTobe("carte")} icon={<Sparkles />} title="Services à la carte" text="Choisissez seulement ce dont vous avez besoin." />
             {tobe === "carte" && (
               <div className="flex flex-wrap gap-2">
                 {TOBE_SERVICES.map((s) => (
-                  <button key={s} onClick={() => setServices(services.includes(s) ? services.filter((x) => x !== s) : [...services, s])} className={cx("flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium", services.includes(s) ? "border-gold bg-gold text-[#1b1206]" : "border-line bg-card")}>
+                  <button key={s} onClick={() => setServices(services.includes(s) ? services.filter((x) => x !== s) : [...services, s])} className={cx("flex h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium", services.includes(s) ? "border-brand bg-brand text-white" : "border-line bg-card")}>
                     {services.includes(s) && <Check className="size-4" />} {s}
                   </button>
                 ))}
@@ -428,6 +434,11 @@ export function Create() {
             <BigChoice active={tobe === "devis"} onClick={() => setTobe("devis")} icon={<HandCoins />} title="Simple devis" text="Recevez une estimation sans engagement." />
             {tobe && (
               <div className="space-y-3">
+                {!me?.user.phone && (
+                  <Field label="Votre numéro de téléphone" hint="Pour que le conseiller ToBe vous rappelle.">
+                    <input type="tel" inputMode="tel" className={inputCls} placeholder="90 12 34 56" value={tobePhone} onChange={(e) => setTobePhone(e.target.value)} />
+                  </Field>
+                )}
                 <Field label="Budget envisagé (facultatif)">
                   <input className={inputCls} placeholder="Ex. 1 500 000 FCFA" value={budget} onChange={(e) => setBudget(e.target.value)} />
                 </Field>
@@ -443,14 +454,14 @@ export function Create() {
         )}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
+      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 lg:static lg:mt-8 lg:rounded-3xl lg:border lg:bg-card-2 lg:p-4 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
         {step < STEPS.length - 1 ? (
           <Button full size="lg" disabled={!valid[step]} onClick={() => setStep(step + 1)}>
             Continuer
           </Button>
         ) : (
           <Button full size="lg" loading={busy} disabled={!valid.every(Boolean)} onClick={() => publish()} icon={<Rocket className="size-5" />}>
-            {boost ? `Publier et booster (${formatFcfa(PRICING.boosts[boost].price)})` : "Publier mon événement"}
+            {boost && payments ? `Publier et booster (${formatFcfa(PRICING.boosts[boost].price)})` : "Publier mon événement"}
           </Button>
         )}
       </div>
@@ -460,7 +471,7 @@ export function Create() {
           <div className="space-y-4">
             <div className="flex items-center justify-between rounded-2xl border border-line bg-card p-4">
               <span className="font-semibold">{PRICING.boosts[boost].label}</span>
-              <span className="font-display text-lg font-bold text-gold">{formatFcfa(PRICING.boosts[boost].price)}</span>
+              <span className="font-display text-lg font-bold text-brand">{formatFcfa(PRICING.boosts[boost].price)}</span>
             </div>
             <PayPicker value={method} onChange={setMethod} />
             <Button full loading={busy} onClick={() => publish(method)}>
@@ -475,22 +486,35 @@ export function Create() {
 
 function BigChoice({ active, onClick, icon, title, text }: { active: boolean; onClick: () => void; icon: ReactNode; title: string; text: string }) {
   return (
-    <button onClick={onClick} className={cx("flex w-full items-center gap-4 rounded-[20px] border p-4 text-left transition", active ? "border-gold bg-gold/10" : "border-line bg-card")}>
-      <span className={cx("grid size-12 shrink-0 place-items-center rounded-2xl [&>svg]:size-6", active ? "bg-gold text-[#1b1206]" : "bg-card-2 text-gold")}>{icon}</span>
+    <button onClick={onClick} className={cx("flex w-full items-center gap-4 rounded-[20px] border p-4 text-left transition", active ? "border-brand bg-brand/10" : "border-line bg-card")}>
+      <span className={cx("grid size-12 shrink-0 place-items-center rounded-2xl [&>svg]:size-6", active ? "bg-brand text-white" : "bg-card-2 text-brand")}>{icon}</span>
       <span className="flex-1">
         <span className="block font-display text-[16px] font-bold">{title}</span>
         <span className="mt-0.5 block text-sm text-muted">{text}</span>
       </span>
-      <span className={cx("grid size-6 shrink-0 place-items-center rounded-full border-2", active ? "border-gold bg-gold text-[#1b1206]" : "border-white/20")}>{active && <Check className="size-3.5" strokeWidth={3} />}</span>
+      <span className={cx("grid size-6 shrink-0 place-items-center rounded-full border-2", active ? "border-brand bg-brand text-white" : "border-ink/20")}>{active && <Check className="size-3.5" strokeWidth={3} />}</span>
     </button>
+  );
+}
+
+function SoonCard({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-[20px] border border-dashed border-line p-4 opacity-80">
+      <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-card-2 text-faint [&>svg]:size-5">{icon}</span>
+      <div className="flex-1">
+        <div className="font-semibold">{title}</div>
+        <div className="text-xs text-muted">{text}</div>
+      </div>
+      <span className="rounded-full bg-ink/10 px-2.5 py-1 text-[11px] font-bold uppercase text-muted">Bientôt</span>
+    </div>
   );
 }
 
 function OptionCard({ icon, title, text, on, onChange, children }: { icon: ReactNode; title: string; text: string; on: boolean; onChange: (v: boolean) => void; children?: ReactNode }) {
   return (
-    <div className={cx("rounded-[20px] border p-4 transition", on ? "border-gold/60 bg-card" : "border-line bg-card")}>
+    <div className={cx("rounded-[20px] border p-4 transition", on ? "border-brand/60 bg-card" : "border-line bg-card")}>
       <div className="flex items-center gap-3">
-        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-card-2 text-gold [&>svg]:size-5">{icon}</span>
+        <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-card-2 text-brand [&>svg]:size-5">{icon}</span>
         <div className="flex-1">
           <div className="font-semibold">{title}</div>
           <div className="text-xs text-muted">{text}</div>
@@ -517,7 +541,7 @@ function CandidateRow({ n, c, onChange, onRemove }: { n: number; c: { name: stri
     <div className="flex items-center gap-2">
       <label className="relative shrink-0 cursor-pointer">
         <input type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
-        {c.photo ? <Avatar name={c.name || String(n)} src={c.photo} size={46} /> : <span className="grid size-[46px] place-items-center rounded-full border border-dashed border-white/25 text-faint"><ImagePlus className="size-4" /></span>}
+        {c.photo ? <Avatar name={c.name || String(n)} src={c.photo} size={46} /> : <span className="grid size-[46px] place-items-center rounded-full border border-dashed border-ink/25 text-faint"><ImagePlus className="size-4" /></span>}
       </label>
       <input className={`${inputCls} flex-1`} placeholder={`Candidat n° ${n}`} value={c.name} onChange={(e) => onChange({ ...c, name: e.target.value })} />
       {onRemove && (
@@ -535,7 +559,7 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
   const text = `${e.title} — ${shortDate(e.startsAt)}, ${e.venue}. ${e.access === "paid" ? "Billets" : "Infos"} sur ToBe : ${url}`;
   return (
     <div className="min-h-full px-5 pb-10 pt-safe">
-      <div className="pop mx-auto mt-10 grid size-20 place-items-center rounded-full gold-gradient text-[#1b1206]">
+      <div className="pop mx-auto mt-10 grid size-20 place-items-center rounded-full brand-gradient text-white">
         <Check className="size-10" strokeWidth={3} />
       </div>
       <h1 className="mt-5 text-center text-[26px] font-extrabold">C'est en ligne !</h1>
@@ -554,7 +578,7 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
         </Poster>
         <div className="flex items-center justify-between p-3 text-xs text-muted">
           <span className="flex items-center gap-1">{e.visibility === "public" ? <Eye className="size-4" /> : <EyeOff className="size-4" />} {e.visibility === "public" ? "Public" : e.visibility === "unlisted" ? "Non listé" : "Privé"}</span>
-          <span className="font-semibold text-gold">ToBe</span>
+          <span className="font-semibold text-brand">ToBe</span>
         </div>
       </div>
 
@@ -564,12 +588,12 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
             <div className="text-xs text-muted">Code d'accès des invités</div>
             <div className="font-mono text-xl font-bold tracking-widest">{e.accessCode}</div>
           </div>
-          <Lock className="size-5 text-gold" />
+          <Lock className="size-5 text-brand" />
         </div>
       )}
       {tobe && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-gold/40 bg-gold/10 p-4 text-sm">
-          <Sparkles className="mt-0.5 size-5 shrink-0 text-gold" />
+        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-4 text-sm">
+          <Sparkles className="mt-0.5 size-5 shrink-0 text-brand" />
           <span>
             <b>Demande transmise à l'agence ToBe.</b> Un conseiller vous rappelle sous 24 h.
           </span>

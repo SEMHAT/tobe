@@ -18,7 +18,7 @@ interface PhotoGroup {
 }
 
 export function Photos() {
-  const { me, ready, requireAuth, refresh, toast } = useSession();
+  const { me, ready, requireAuth, refresh, toast, payments } = useSession();
   const [sp, setSp] = useSearchParams();
   const eventFilter = sp.get("event");
   const [scan, setScan] = useState<null | "pass" | "once">(null);
@@ -65,19 +65,19 @@ export function Photos() {
       {eventFilter && (
         <div className="mx-5 mt-3 flex items-center justify-between rounded-2xl bg-card px-4 py-2.5 text-sm">
           <span className="text-muted">Filtré sur un événement</span>
-          <button className="font-semibold text-gold" onClick={() => (sp.delete("event"), setSp(sp, { replace: true }))}>
+          <button className="font-semibold text-brand" onClick={() => (sp.delete("event"), setSp(sp, { replace: true }))}>
             Tout voir
           </button>
         </div>
       )}
 
       {!passOn && !once && (
-        <div className="px-5 pt-5">
-          <div className="relative overflow-hidden rounded-[26px] border border-gold/30 bg-gradient-to-b from-[#2b1f08] to-[#121014] p-6 text-white">
-            <div className="absolute -right-16 -top-16 size-56 rounded-full bg-gold/25 blur-3xl" />
-            <div className="relative mx-auto grid size-28 place-items-center rounded-[34px] border-2 border-gold/70 bg-black/30">
-              <ScanFace className="size-14 text-gold" strokeWidth={1.4} />
-              <div className="scanline absolute inset-x-3 h-0.5 rounded bg-gold shadow-[0_0_14px_#f2b233]" />
+        <div className="px-5 pt-5 lg:mx-auto lg:max-w-xl">
+          <div className="relative overflow-hidden rounded-[26px] bg-gradient-to-b from-[#1800ad] to-[#0b0b12] p-6 text-white">
+            <div className="absolute -right-16 -top-16 size-56 rounded-full bg-brand/25 blur-3xl" />
+            <div className="relative mx-auto grid size-28 place-items-center rounded-[34px] border-2 border-white/70 bg-black/25">
+              <ScanFace className="size-14 text-white" strokeWidth={1.4} />
+              <div className="scanline absolute inset-x-3 h-0.5 rounded bg-white shadow-[0_0_14px_#fff]" />
             </div>
             <h2 className="relative mt-5 text-center text-[22px] font-extrabold">Le Pass ToBe</h2>
             <p className="relative mt-2 text-center text-sm leading-relaxed text-white/70">Enregistrez votre visage une seule fois. Dès qu'un organisateur publie une galerie où vous apparaissez, vous êtes prévenu et vos photos sont là.</p>
@@ -86,7 +86,7 @@ export function Photos() {
               <Li icon={<Lock className="size-4" />}>Le selfie reste sur votre téléphone : seule une empreinte chiffrée est enregistrée.</Li>
               <Li icon={<EyeOff className="size-4" />}>Option « ne jamais me montrer » pour disparaître des galeries.</Li>
             </ul>
-            <Button full size="lg" className="relative mt-6" onClick={startPass} icon={<ScanFace className="size-5" />}>
+            <Button full size="lg" variant="white" className="relative mt-6" onClick={startPass} icon={<ScanFace className="size-5" />}>
               Activer mon Pass ToBe
             </Button>
             <button onClick={() => setScan("once")} className="relative mt-3 w-full text-center text-sm font-semibold text-white/70">
@@ -101,7 +101,7 @@ export function Photos() {
           {once && (
             <div className="mb-3 flex items-center justify-between rounded-2xl border border-line bg-card px-4 py-3 text-sm">
               <span className="text-muted">Recherche ponctuelle (visage non enregistré)</span>
-              <button className="font-semibold text-gold" onClick={() => setOnce(null)}>
+              <button className="font-semibold text-brand" onClick={() => setOnce(null)}>
                 Fermer
               </button>
             </div>
@@ -115,19 +115,19 @@ export function Photos() {
           {loading && !once && <PageLoader />}
           {!loading || once ? (
             total === 0 ? (
-              <Empty icon={<Camera className="size-7" />} title="Pas encore de photo de vous" text="Dès que les organisateurs publient leurs galeries, vos photos apparaissent ici." action={<Link to="/explorer" className="font-semibold text-gold">Découvrir des événements</Link>} />
+              <Empty icon={<Camera className="size-7" />} title="Pas encore de photo de vous" text="Dès que les organisateurs publient leurs galeries, vos photos apparaissent ici." action={<Link to="/explorer" className="font-semibold text-brand">Découvrir des événements</Link>} />
             ) : (
               <div className="mt-2 pb-6">
                 <div className="mb-1 text-sm text-muted">
                   {total} photo{total > 1 ? "s" : ""} de vous
                 </div>
                 {shown.map((g) => (
-                  <Gallery key={g.event.id} g={g} premium={!!me?.premium} onRemoved={() => reload()} />
+                  <Gallery key={g.event.id} g={g} premium={!!me?.premium || !payments} onRemoved={() => reload()} />
                 ))}
               </div>
             )
           ) : null}
-          {passOn && !me?.premium && <PremiumCard />}
+          {passOn && !me?.premium && payments && <PremiumCard />}
         </div>
       )}
 
@@ -140,7 +140,7 @@ export function Photos() {
 function Li({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <li className="flex gap-2.5">
-      <span className="mt-0.5 text-gold">{icon}</span>
+      <span className="mt-0.5 text-[#b3abff]">{icon}</span>
       <span>{children}</span>
     </li>
   );
@@ -189,7 +189,7 @@ function Gallery({ g, premium, onRemoved }: { g: PhotoGroup; premium: boolean; o
           </div>
         </div>
       </Link>
-      <div className="grid grid-cols-3 gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-6 lg:gap-2">
         {g.photos.map((p) => (
           <button
             key={p.id}
@@ -198,7 +198,7 @@ function Gallery({ g, premium, onRemoved }: { g: PhotoGroup; premium: boolean; o
             className="relative aspect-square overflow-hidden rounded-xl"
           >
             <Img src={p.url} className="size-full object-cover" />
-            {sel.length > 0 && <span className={cx("absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full border-2 border-white", sel.includes(p.id) ? "bg-gold" : "bg-black/30")}>{sel.includes(p.id) && <CheckCircle2 className="size-4 text-[#1b1206]" />}</span>}
+            {sel.length > 0 && <span className={cx("absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full border-2 border-white", sel.includes(p.id) ? "bg-brand" : "bg-black/30")}>{sel.includes(p.id) && <CheckCircle2 className="size-4 text-white" />}</span>}
           </button>
         ))}
       </div>
@@ -251,7 +251,7 @@ async function renderPhoto(url: string, premium: boolean): Promise<Blob> {
     const w = ctx.measureText(text).width;
     ctx.fillStyle = "rgba(0,0,0,0.35)";
     ctx.fillRect(c.width - w - s * 1.6, c.height - s * 2.2, w + s * 1.2, s * 1.6);
-    ctx.fillStyle = "#f2b233";
+    ctx.fillStyle = "#1800ad";
     ctx.fillText(text, c.width - w - s, c.height - s * 0.95);
   }
   return new Promise((res) => c.toBlob((b) => res(b!), "image/jpeg", 0.92));
@@ -262,7 +262,7 @@ function PremiumCard() {
   const [busy, setBusy] = useState(false);
   return (
     <Card className="mb-8 mt-6 overflow-hidden">
-      <div className="gold-gradient px-5 py-4 text-[#1b1206]">
+      <div className="brand-gradient px-5 py-4 text-white">
         <div className="flex items-center gap-2 font-display text-lg font-extrabold">
           <Crown className="size-5" /> Pass ToBe Premium
         </div>
@@ -414,7 +414,7 @@ export function CameraSheet({ open, onClose, onDescriptor, title }: { open: bool
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-muted">ToBe va analyser votre visage sur ce téléphone pour en tirer une empreinte (une suite de nombres). La photo elle-même n'est pas envoyée. Vous pouvez supprimer cette empreinte à tout moment.</p>
           <label className="flex items-start gap-3 rounded-2xl border border-line bg-card p-4 text-sm">
-            <input type="checkbox" className="mt-0.5 size-5 accent-[#f2b233]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
+            <input type="checkbox" className="mt-0.5 size-5 accent-[#1800ad]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
             <span>J'accepte que ToBe utilise l'empreinte de mon visage pour retrouver les photos où j'apparais.</span>
           </label>
           <Button full disabled={!agree} onClick={start} icon={<Camera className="size-5" />}>
@@ -429,11 +429,11 @@ export function CameraSheet({ open, onClose, onDescriptor, title }: { open: bool
         <div className="space-y-4">
           <div className="relative mx-auto aspect-[3/4] w-full max-w-[300px] overflow-hidden rounded-[32px] bg-black">
             {stream && <video ref={video} playsInline muted className="size-full -scale-x-100 object-cover" />}
-            <div className="pointer-events-none absolute inset-[12%] rounded-[45%] border-[3px] border-gold/80 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
-            {(state === "camera" || state === "working") && <div className="scanline pointer-events-none absolute inset-x-[14%] h-0.5 rounded bg-gold shadow-[0_0_14px_#f2b233]" />}
+            <div className="pointer-events-none absolute inset-[12%] rounded-[45%] border-[3px] border-brand/80 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
+            {(state === "camera" || state === "working") && <div className="scanline pointer-events-none absolute inset-x-[14%] h-0.5 rounded bg-brand shadow-[0_0_14px_#1800ad]" />}
             {(state === "loading" || state === "working") && (
               <div className="absolute inset-0 grid place-items-center">
-                <Loader2 className="size-10 animate-spin text-gold" />
+                <Loader2 className="size-10 animate-spin text-brand" />
               </div>
             )}
           </div>

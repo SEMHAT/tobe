@@ -1,5 +1,5 @@
-import type { EventCard, TobeRequest } from "@tobe/core";
-import { Phone, Sparkles } from "lucide-react";
+import type { EventCard, Provider, TobeRequest } from "@tobe/core";
+import { BadgeCheck, Mail, Phone, Sparkles, Store } from "lucide-react";
 import { Empty, ErrorState, PageLoader, Stat, TopBar, cx } from "../components/ui";
 import { api } from "../lib/api";
 import { ago, compact, formatFcfa, formatPhone } from "../lib/format";
@@ -8,9 +8,10 @@ import { useLoad } from "../lib/useLoad";
 
 interface Overview {
   requests: (TobeRequest & { event: EventCard | null })[];
+  providers: Provider[];
   revenue: Record<string, { amount: number; platform: number; count: number }>;
   platformTotal: number;
-  counts: { users: number; events: number; tickets: number; photos: number; passUsers: number; quotes: number };
+  counts: { users: number; events: number; tickets: number; photos: number; passUsers: number; quotes: number; providers: number };
 }
 
 const STATUSES: [TobeRequest["status"], string][] = [
@@ -24,7 +25,7 @@ const KIND: Record<string, string> = { ticket: "Billetterie", vote: "Votes", con
 const LEVEL: Record<string, string> = { complete: "Organisation complète", carte: "À la carte", devis: "Devis" };
 
 export function TobeAdmin() {
-  const { me, toast } = useSession();
+  const { me, toast, payments } = useSession();
   const { data, error, loading, setData } = useLoad(() => api<Overview>("GET", "/admin"), [me?.user.id]);
   if (loading) return <PageLoader />;
   if (error || !data)
@@ -42,11 +43,19 @@ export function TobeAdmin() {
       toast((e as Error).message, "error");
     }
   };
+  const setProvider = async (id: string, patch: { status?: Provider["status"]; certified?: boolean }) => {
+    try {
+      const p = await api<Provider>("PATCH", `/admin/providers/${id}`, patch);
+      setData({ ...data, providers: data.providers.map((x) => (x.id === id ? p : x)) });
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
   return (
     <div className="pb-10">
       <TopBar title="Espace agence ToBe" />
-      <div className="px-5 pt-4">
-        <div className="rounded-[22px] gold-gradient p-5 text-[#1b1206]">
+      <div className="px-5 pt-4 lg:px-0">
+        {payments && <><div className="rounded-[22px] brand-gradient p-5 text-white">
           <div className="text-sm font-semibold">Revenus de la plateforme</div>
           <div className="mt-1 font-display text-3xl font-extrabold">{formatFcfa(data.platformTotal)}</div>
         </div>
@@ -56,21 +65,24 @@ export function TobeAdmin() {
               <span>
                 <span className="font-semibold">{KIND[k] ?? k}</span> <span className="text-muted">· {r.count} paiement(s)</span>
               </span>
-              <span className="font-display font-bold text-gold">{formatFcfa(r.platform)}</span>
+              <span className="font-display font-bold text-brand">{formatFcfa(r.platform)}</span>
             </div>
           ))}
-        </div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        </div></>}
+        <div className="mt-4 grid grid-cols-3 gap-2 lg:grid-cols-7">
           <Stat label="Comptes" value={compact(data.counts.users)} />
           <Stat label="Événements" value={compact(data.counts.events)} />
           <Stat label="Billets" value={compact(data.counts.tickets)} />
           <Stat label="Photos" value={compact(data.counts.photos)} />
           <Stat label="Pass actifs" value={compact(data.counts.passUsers)} />
           <Stat label="Devis presta." value={compact(data.counts.quotes)} />
+          <Stat label="Prestataires" value={compact(data.counts.providers)} />
         </div>
 
+        <div className="lg:grid lg:grid-cols-2 lg:gap-8">
+        <div>
         <h2 className="mb-3 mt-7 flex items-center gap-2 text-lg font-bold">
-          <Sparkles className="size-5 text-gold" /> Demandes « Confier à ToBe »
+          <Sparkles className="size-5 text-brand" /> Demandes « Confier à ToBe »
         </h2>
         {data.requests.length === 0 && <Empty icon={<Sparkles className="size-7" />} title="Aucune demande" text="Les demandes cochées à la création d'un événement arrivent ici." />}
         <div className="space-y-3">
@@ -83,25 +95,73 @@ export function TobeAdmin() {
                     {LEVEL[r.level]} · {ago(r.createdAt)}
                   </div>
                 </div>
-                <a href={`tel:${r.phone}`} className="flex shrink-0 items-center gap-1 rounded-full bg-gold/15 px-3 py-1.5 text-xs font-bold text-gold">
+                <a href={`tel:${r.phone}`} className="flex shrink-0 items-center gap-1 rounded-full bg-brand/15 px-3 py-1.5 text-xs font-bold text-brand">
                   <Phone className="size-3.5" /> Appeler
                 </a>
               </div>
               <div className="mt-2 text-sm">
                 {r.name || "Client"} · {formatPhone(r.phone)}
               </div>
+              {r.email && (
+                <a href={`mailto:${r.email}`} className="mt-0.5 flex items-center gap-1 text-sm text-muted">
+                  <Mail className="size-3.5" /> {r.email}
+                </a>
+              )}
               {r.services.length > 0 && <div className="mt-1 text-sm text-muted">{r.services.join(", ")}</div>}
               {r.budget && <div className="mt-1 text-sm">Budget : {r.budget}</div>}
               {r.note && <p className="mt-1 text-sm italic text-muted">« {r.note} »</p>}
               <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto">
                 {STATUSES.map(([s, l]) => (
-                  <button key={s} onClick={() => setStatus(r.id, s)} className={cx("h-8 shrink-0 rounded-full border px-3 text-xs font-semibold", r.status === s ? "border-gold bg-gold text-[#1b1206]" : "border-line")}>
+                  <button key={s} onClick={() => setStatus(r.id, s)} className={cx("h-8 shrink-0 rounded-full border px-3 text-xs font-semibold", r.status === s ? "border-brand bg-brand text-white" : "border-line")}>
                     {l}
                   </button>
                 ))}
               </div>
             </div>
           ))}
+        </div>
+        </div>
+        <div>
+          <h2 className="mb-3 mt-7 flex items-center gap-2 text-lg font-bold">
+            <Store className="size-5 text-brand" /> Prestataires
+          </h2>
+          {data.providers.length === 0 && <Empty icon={<Store className="size-7" />} title="Aucune inscription" text="Les demandes d'inscription à l'annuaire arrivent ici." />}
+          <div className="space-y-3">
+            {data.providers.map((p) => (
+              <div key={p.id} className="rounded-[20px] border border-line bg-card p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 truncate font-display font-bold">
+                      {p.name} {p.certified && <BadgeCheck className="size-4 text-brand" />}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {p.category} · {p.city} · {formatPhone(p.phone)} · {p.email}
+                    </div>
+                  </div>
+                  <span className={cx("shrink-0 rounded-full px-2.5 py-1 text-xs font-bold", p.status === "approved" ? "bg-emerald/15 text-emerald" : p.status === "pending" ? "bg-brand-soft text-brand" : "bg-ink/10 text-muted")}>
+                    {p.status === "approved" ? "En ligne" : p.status === "pending" ? "À vérifier" : "Refusé"}
+                  </span>
+                </div>
+                <p className="mt-2 line-clamp-3 text-sm text-muted">{p.bio}</p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {p.status !== "approved" && (
+                    <button onClick={() => setProvider(p.id, { status: "approved" })} className="h-8 rounded-full bg-brand px-3 text-xs font-bold text-white">
+                      Valider
+                    </button>
+                  )}
+                  {p.status !== "rejected" && (
+                    <button onClick={() => setProvider(p.id, { status: "rejected" })} className="h-8 rounded-full border border-line px-3 text-xs font-semibold">
+                      Refuser
+                    </button>
+                  )}
+                  <button onClick={() => setProvider(p.id, { certified: !p.certified })} className="h-8 rounded-full border border-line px-3 text-xs font-semibold">
+                    {p.certified ? "Retirer le badge" : "Badge « Certifié ToBe »"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         </div>
       </div>
     </div>

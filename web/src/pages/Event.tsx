@@ -19,7 +19,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EventMap } from "../components/Map";
 import { Button, Card, ErrorState, IconButton, PageLoader, Progress, TopBar, cx, inputCls } from "../components/ui";
-import { Avatar, Img, Poster, THEMES, TierBadge } from "../components/visual";
+import { Avatar, Img, Poster, TierBadge } from "../components/visual";
 import { api } from "../lib/api";
 import { CATEGORY_LABELS, compact, countdown, formatFcfa, longDate, shareUrl, time, whatsappLink } from "../lib/format";
 import { useSession } from "../lib/session";
@@ -74,8 +74,8 @@ export function EventPage() {
   };
 
   return (
-    <div className="pb-28">
-      <div className="relative">
+    <div className="pb-28 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-12 lg:pb-10">
+      <div className="relative lg:sticky lg:top-24 lg:self-start lg:overflow-hidden lg:rounded-[32px]">
         <Poster cover={e.cover} theme={e.theme} category={e.category} title={e.title} showTitle={!e.cover} className="aspect-[4/4.4] w-full">
           <div className="absolute inset-0 bg-gradient-to-t from-[var(--bg)] via-black/10 to-black/40" />
         </Poster>
@@ -101,7 +101,8 @@ export function EventPage() {
         </div>
       </div>
 
-      <div className="relative -mt-16 px-5">
+      <div className="lg:min-w-0">
+      <div className="relative -mt-16 px-5 lg:mt-0 lg:px-0">
         <div className="flex flex-wrap items-center gap-2">
           <TierBadge tier={e.impact.tier} />
           <span className="rounded-full bg-card px-2.5 py-1 text-xs font-semibold text-muted">{CATEGORY_LABELS[e.category]}</span>
@@ -125,7 +126,7 @@ export function EventPage() {
           <div className="min-w-0 flex-1">
             <div className="text-xs text-muted">Organisé par</div>
             <div className="flex items-center gap-1 truncate font-semibold">
-              {e.organizerName} <BadgeCheck className="size-4 shrink-0 text-gold" />
+              {e.organizerName} <BadgeCheck className="size-4 shrink-0 text-brand" />
             </div>
           </div>
         </div>
@@ -142,18 +143,18 @@ export function EventPage() {
         )}
       </div>
 
-      <div className="sticky top-0 z-20 mt-6 border-b border-line bg-app/90 backdrop-blur-xl">
-        <div className="no-scrollbar flex gap-6 overflow-x-auto px-5">
+      <div className="sticky top-0 z-20 mt-6 border-b border-line bg-app/90 backdrop-blur-xl lg:top-16">
+        <div className="no-scrollbar flex gap-6 overflow-x-auto px-5 lg:px-0">
           {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)} className={cx("relative h-12 shrink-0 text-[15px] font-semibold", tab === t.id ? "text-ink" : "text-faint")}>
               {t.label}
-              {tab === t.id && <span className="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-gold" />}
+              {tab === t.id && <span className="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-brand" />}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="px-5 pt-5">
+      <div className="px-5 pt-5 lg:px-0">
         {tab === "infos" && (
           <div className="space-y-5">
             <p className="whitespace-pre-line text-[15px] leading-relaxed text-ink/85">{e.description || "L'organisateur n'a pas encore ajouté de description."}</p>
@@ -165,7 +166,7 @@ export function EventPage() {
                       <div className="font-semibold">{t.name}</div>
                       {t.quota > 0 && <div className="text-xs text-muted">{Math.max(0, t.quota - t.sold)} places restantes</div>}
                     </div>
-                    <div className="font-display font-bold text-gold">{formatFcfa(t.price)}</div>
+                    <div className="font-display font-bold text-brand">{formatFcfa(t.price)}</div>
                   </div>
                 ))}
               </div>
@@ -178,8 +179,8 @@ export function EventPage() {
           <ol className="relative space-y-5 border-l border-line pl-6">
             {e.program.map((p, i) => (
               <li key={i} className="relative">
-                <span className="absolute -left-[31px] top-1 size-3.5 rounded-full border-[3px] border-[var(--bg)] bg-gold" />
-                <div className="font-display text-sm font-bold text-gold">{p.time}</div>
+                <span className="absolute -left-[31px] top-1 size-3.5 rounded-full border-[3px] border-[var(--bg)] bg-brand" />
+                <div className="font-display text-sm font-bold text-brand">{p.time}</div>
                 <div className="mt-0.5 font-semibold">{p.label}</div>
               </li>
             ))}
@@ -190,8 +191,9 @@ export function EventPage() {
         {tab === "photos" && <PhotosTab e={e} code={code} />}
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
+      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl lg:static lg:mt-8 lg:rounded-3xl lg:border lg:bg-card-2 lg:p-5">
         <BottomAction e={e} minPrice={minPrice} ended={ended} />
+      </div>
       </div>
     </div>
   );
@@ -201,13 +203,13 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
   const nav = useNavigate();
   if (e.myTickets > 0)
     return (
-      <Button full size="lg" variant="dark" icon={<Ticket className="size-5 text-gold" />} onClick={() => nav("/billets")}>
+      <Button full size="lg" variant="dark" icon={<Ticket className="size-5 text-brand" />} onClick={() => nav("/billets")}>
         {e.myTickets > 1 ? `Mes ${e.myTickets} billets` : "Voir mon billet"}
       </Button>
     );
   if (ended)
     return (
-      <Button full size="lg" variant="dark" icon={<Camera className="size-5 text-gold" />} onClick={() => nav(`/photos?event=${e.id}`)}>
+      <Button full size="lg" variant="dark" icon={<Camera className="size-5 text-brand" />} onClick={() => nav(`/photos?event=${e.id}`)}>
         Retrouver mes photos
       </Button>
     );
@@ -227,7 +229,7 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
 function InfoRow({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
   return (
     <div className="flex items-center gap-3.5">
-      <span className="grid size-11 place-items-center rounded-2xl bg-card text-gold">{icon}</span>
+      <span className="grid size-11 place-items-center rounded-2xl bg-card text-brand">{icon}</span>
       <div>
         <div className="font-semibold">{title}</div>
         <div className="text-sm text-muted">{sub}</div>
@@ -238,8 +240,8 @@ function InfoRow({ icon, title, sub }: { icon: React.ReactNode; title: string; s
 
 function TobeUpsell() {
   return (
-    <Link to="/creer" className="flex items-center gap-3 rounded-2xl border border-dashed border-gold/40 p-4">
-      <span className="grid size-10 place-items-center rounded-xl bg-gold/15 text-gold">
+    <Link to="/creer" className="flex items-center gap-3 rounded-2xl border border-dashed border-brand/40 p-4 transition hover:bg-brand-soft">
+      <span className="grid size-10 place-items-center rounded-xl bg-brand/15 text-brand">
         <Crown className="size-5" />
       </span>
       <span className="flex-1 text-sm">
@@ -258,7 +260,7 @@ function VotesTab({ contestId }: { contestId: string }) {
     <div>
       <div className="mb-3 flex items-center justify-between text-sm">
         <span className="text-muted">{data.isOpen ? `Clôture dans ${countdown(data.closesAt)}` : "Vote clôturé"}</span>
-        {data.totalVotes !== null && <span className="font-semibold text-gold">{compact(data.totalVotes)} votes</span>}
+        {data.totalVotes !== null && <span className="font-semibold text-brand">{compact(data.totalVotes)} votes</span>}
       </div>
       <div className="space-y-2">
         {data.candidates.slice(0, 5).map((c: any) => (
@@ -266,7 +268,7 @@ function VotesTab({ contestId }: { contestId: string }) {
             <span className="w-5 text-center font-display font-bold text-muted">{c.rank ?? "–"}</span>
             <Avatar name={c.name} src={c.photo} size={40} />
             <span className="flex-1 truncate font-semibold">{c.name}</span>
-            <span className="font-semibold text-gold">{c.votes !== null ? compact(c.votes) : "?"}</span>
+            <span className="font-semibold text-brand">{c.votes !== null ? compact(c.votes) : "?"}</span>
           </Link>
         ))}
       </div>
@@ -298,7 +300,7 @@ function CagnotteTab({ id, code }: { id: string; code: string }) {
       )}
       <Link to={`/cagnotte/${id}`}>
         <Button full className="mt-4" icon={<HandCoins className="size-5" />}>
-          Contribuer
+          Voir la cagnotte
         </Button>
       </Link>
     </Card>
@@ -309,15 +311,15 @@ function PhotosTab({ e, code }: { e: EventView; code: string }) {
   const { data } = useLoad(() => api<{ id: string; url: string }[]>("GET", `/events/${e.id}/photos`, undefined, { code }), [e.id, code]);
   return (
     <div>
-      <Link to={`/photos?event=${e.id}`} className="mb-4 flex items-center gap-3 rounded-2xl border border-gold/40 bg-gold/10 p-3.5">
-        <Camera className="size-5 text-gold" />
+      <Link to={`/photos?event=${e.id}`} className="mb-4 flex items-center gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-3.5">
+        <Camera className="size-5 text-brand" />
         <span className="flex-1 text-sm font-semibold">Me retrouver sur ces photos avec mon visage</span>
-        <ChevronRight className="size-5 text-gold" />
+        <ChevronRight className="size-5 text-brand" />
       </Link>
       {!data && <div className="skeleton h-40 rounded-2xl" />}
       {data && data.length === 0 && <p className="py-8 text-center text-sm text-muted">La galerie sera publiée par l'organisateur après l'événement.</p>}
       {data && data.length > 0 && (
-        <div className="grid grid-cols-3 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-4">
           {data.map((p) => (
             <Img key={p.id} src={p.url} className="aspect-square w-full rounded-lg object-cover" />
           ))}
@@ -334,7 +336,7 @@ function PrivateGate({ title, onCode, wrong }: { title: string; onCode: (c: stri
     <div className="min-h-full">
       <TopBar title="" />
       <div className="px-6 pt-10 text-center">
-        <div className="mx-auto grid size-20 place-items-center rounded-[28px] bg-card text-gold" style={{ boxShadow: `0 0 80px -10px ${THEMES.or.glow}55` }}>
+        <div className="mx-auto grid size-20 place-items-center rounded-[28px] bg-brand-soft text-brand">
           <Lock className="size-9" />
         </div>
         <h1 className="mt-6 text-2xl font-extrabold">{title}</h1>
@@ -353,7 +355,7 @@ function PrivateGate({ title, onCode, wrong }: { title: string; onCode: (c: stri
           </Button>
         </form>
         {!me && (
-          <button className="mt-5 text-sm text-muted" onClick={() => requireAuth("Connectez-vous : si votre numéro figure sur la liste des invités, l'accès est automatique.")}>
+          <button className="mt-5 text-sm text-muted" onClick={() => requireAuth("Connectez-vous : si votre e-mail figure sur la liste des invités, l'accès est automatique.")}>
             Je suis sur la liste des invités
           </button>
         )}

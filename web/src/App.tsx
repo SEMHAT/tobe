@@ -18,7 +18,7 @@ import { NotFound } from "./pages/NotFound";
 
 function HomeGate() {
   const loc = useLocation();
-  if (!localStorage.getItem("tobe-onboarded")) return <Navigate to="/bienvenue" replace state={{ from: loc.pathname }} />;
+  if (!localStorage.getItem("tobe-onboarded") && window.matchMedia("(max-width: 1023px)").matches) return <Navigate to="/bienvenue" replace state={{ from: loc.pathname }} />;
   return <Home />;
 }
 

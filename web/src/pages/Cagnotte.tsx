@@ -29,7 +29,7 @@ const AMOUNTS = [5000, 10000, 25000, 50000];
 
 export function CagnottePage() {
   const { id = "" } = useParams();
-  const { me, requireAuth, toast } = useSession();
+  const { me, requireAuth, toast, payments } = useSession();
   const [code, setCode] = useState<string | undefined>(undefined);
   const { data: c, error, loading, setData, reload } = useLoad(async () => {
     try {
@@ -62,7 +62,7 @@ export function CagnottePage() {
         <ErrorState message={error?.data?.needCode ? "Cette cagnotte est réservée aux invités : ouvrez d'abord l'événement avec votre code." : (error?.message ?? "Introuvable")} onRetry={reload} />
         {!!error?.data?.eventId && (
           <div className="text-center">
-            <Link className="font-semibold text-gold" to={`/evenement/${String(error.data.eventId)}`}>
+            <Link className="font-semibold text-brand" to={`/evenement/${String(error.data.eventId)}`}>
               Ouvrir l'événement
             </Link>
           </div>
@@ -103,7 +103,7 @@ export function CagnottePage() {
         </div>
       </div>
       <div className="relative -mt-14 px-5">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gold">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-brand">
           <HandCoins className="size-4" /> Cagnotte
         </div>
         <h1 className="mt-1 text-[25px] font-extrabold leading-tight">{c.title}</h1>
@@ -118,11 +118,11 @@ export function CagnottePage() {
             </>
           )}
           <div className="mt-3 flex justify-between text-sm">
-            <span className="font-semibold text-gold">{c.goal ? `${Math.round(pct)} %` : ""}</span>
+            <span className="font-semibold text-brand">{c.goal ? `${Math.round(pct)} %` : ""}</span>
             <span className="text-muted">{c.contributors} contributeur{c.contributors > 1 ? "s" : ""}</span>
           </div>
           <div className="mt-4 flex items-center gap-2 rounded-xl bg-card-2 px-3 py-2.5 text-xs text-muted">
-            <Globe2 className="size-4 shrink-0 text-gold" /> La famille à l'étranger peut contribuer par carte bancaire.
+            <Globe2 className="size-4 shrink-0 text-brand" /> La famille à l'étranger peut contribuer par carte bancaire.
           </div>
         </Card>
 
@@ -144,7 +144,7 @@ export function CagnottePage() {
               <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md bg-card p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-semibold">{x.name}</span>
-                  {x.amount !== null && <span className="shrink-0 text-xs font-bold text-gold">{formatFcfa(x.amount)}</span>}
+                  {x.amount !== null && <span className="shrink-0 text-xs font-bold text-brand">{formatFcfa(x.amount)}</span>}
                 </div>
                 {x.message && <p className="mt-1 text-sm text-ink/85">{x.message}</p>}
                 <div className="mt-1 text-[11px] text-faint">{ago(x.createdAt)}</div>
@@ -154,17 +154,23 @@ export function CagnottePage() {
         </div>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
-        <Button full size="lg" icon={<HandCoins className="size-5" />} onClick={() => setOpen(true)}>
-          Contribuer
-        </Button>
+      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 lg:static lg:mt-8 lg:rounded-3xl lg:border lg:bg-card-2 lg:p-4 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
+        {payments ? (
+          <Button full size="lg" icon={<HandCoins className="size-5" />} onClick={() => setOpen(true)}>
+            Contribuer
+          </Button>
+        ) : (
+          <Button full size="lg" variant="dark" disabled>
+            Contributions en ligne bientôt disponibles
+          </Button>
+        )}
       </div>
 
       <Sheet open={open} onClose={() => setOpen(false)} title="Ma contribution">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
             {AMOUNTS.map((a) => (
-              <button key={a} onClick={() => (setAmount(a), setCustom(""))} className={cx("h-14 rounded-2xl border font-display text-lg font-bold", !custom && amount === a ? "border-gold bg-gold/10 text-gold" : "border-line bg-card")}>
+              <button key={a} onClick={() => (setAmount(a), setCustom(""))} className={cx("h-14 rounded-2xl border font-display text-lg font-bold", !custom && amount === a ? "border-brand bg-brand/10 text-brand" : "border-line bg-card")}>
                 {formatFcfa(a)}
               </button>
             ))}

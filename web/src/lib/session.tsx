@@ -1,4 +1,4 @@
-import { CheckCircle2, AlertCircle, Phone } from "lucide-react";
+import { CheckCircle2, AlertCircle, Mail } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Field, Sheet, inputCls } from "../components/ui";
 import { api, getToken, isDemo, setToken } from "./api";
@@ -6,7 +6,8 @@ import { api, getToken, isDemo, setToken } from "./api";
 export interface Me {
   user: {
     id: string;
-    phone: string;
+    email: string;
+    phone: string | null;
     name: string;
     role: "user" | "admin";
     passEnabled: boolean;
@@ -29,6 +30,8 @@ interface Ctx {
   toast: (msg: string, kind?: "ok" | "error") => void;
   theme: "dark" | "light";
   setTheme: (t: "dark" | "light") => void;
+  /** Paiement en ligne actif (sinon : réservation, paiement à l'entrée). */
+  payments: boolean;
 }
 
 const SessionCtx = createContext<Ctx>(null!);
@@ -40,7 +43,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<{ reason?: string } | null>(null);
   const resolver = useRef<((ok: boolean) => void) | null>(null);
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: "ok" | "error" }[]>([]);
-  const [theme, setThemeState] = useState<"dark" | "light">(() => (localStorage.getItem("tobe-theme") as "dark" | "light") || "dark");
+  const [theme, setThemeState] = useState<"dark" | "light">(() => (localStorage.getItem("tobe-theme") as "dark" | "light") || "light");
+  const [payments, setPayments] = useState(false);
+  useEffect(() => {
+    api<{ paymentsEnabled: boolean }>("GET", "/config")
+      .then((c) => setPayments(c.paymentsEnabled))
+      .catch(() => {});
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!getToken()) {
@@ -97,7 +106,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme }}>
+    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme, payments }}>
       {children}
       <AuthSheet
         open={!!auth}
@@ -108,7 +117,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           finishAuth(true);
         }}
       />
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-[60] flex flex-col items-center gap-2 px-4 pt-[max(env(safe-area-inset-top),12px)]">
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-[80] lg:top-20 flex flex-col items-center gap-2 px-4 pt-[max(env(safe-area-inset-top),12px)]">
         {toasts.map((t) => (
           <div key={t.id} className="rise flex max-w-full items-center gap-2 rounded-2xl border border-line bg-[#1f1f28]/95 px-4 py-3 text-sm font-medium text-white shadow-2xl backdrop-blur">
             {t.kind === "ok" ? <CheckCircle2 className="size-5 shrink-0 text-emerald" /> : <AlertCircle className="size-5 shrink-0 text-coral" />}
@@ -121,8 +130,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 }
 
 function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: string; onClose: () => void; onDone: () => void }) {
-  const [step, setStep] = useState<"phone" | "code" | "name">("phone");
-  const [phone, setPhone] = useState("");
+  const [step, setStep] = useState<"email" | "code" | "name">("email");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [devCode, setDevCode] = useState<string | undefined>();
@@ -131,7 +140,7 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
 
   useEffect(() => {
     if (open) {
-      setStep("phone");
+      setStep("email");
       setCode("");
       setErr("");
     }
@@ -141,7 +150,7 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
     setBusy(true);
     setErr("");
     try {
-      const r = await api<{ devCode?: string; phone: string }>("POST", "/auth/otp", { phone: phone.startsWith("+") ? phone : `+228${phone}` });
+      const r = await api<{ devCode?: string; email: string }>("POST", "/auth/otp", { email: email.trim() });
       setDevCode(r.devCode);
       setStep("code");
     } catch (e) {
@@ -154,7 +163,7 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
     setBusy(true);
     setErr("");
     try {
-      const r = await api<{ token: string; user: { name: string } }>("POST", "/auth/verify", { phone: phone.startsWith("+") ? phone : `+228${phone}`, code });
+      const r = await api<{ token: string; user: { name: string } }>("POST", "/auth/verify", { email: email.trim(), code });
       setToken(r.token);
       if (!r.user.name) setStep("name");
       else onDone();
@@ -177,7 +186,7 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
 
   return (
     <Sheet open={open} onClose={onClose} title={step === "name" ? "Bienvenue sur ToBe" : "Connexion"}>
-      {step === "phone" && (
+      {step === "email" && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -185,16 +194,13 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
           }}
           className="space-y-4"
         >
-          <p className="text-sm text-muted">{reason ?? "Votre numéro suffit : pas de mot de passe, pas d'e-mail."}</p>
-          <Field label="Numéro de téléphone">
-            <div className="flex gap-2">
-              <span className="grid h-[50px] place-items-center rounded-2xl border border-line bg-card px-3 text-sm font-semibold">🇹🇬 +228</span>
-              <input autoFocus inputMode="tel" autoComplete="tel" placeholder="90 12 34 56" className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
+          <p className="text-sm text-muted">{reason ?? "Pas de mot de passe : on vous envoie un code par e-mail."}</p>
+          <Field label="Adresse e-mail">
+            <input autoFocus type="email" inputMode="email" autoComplete="email" placeholder="vous@exemple.com" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           {err && <p className="text-sm text-coral">{err}</p>}
-          <Button full type="submit" loading={busy} disabled={phone.replace(/\D/g, "").length < 8} icon={<Phone className="size-4" />}>
-            Recevoir mon code par SMS
+          <Button full type="submit" loading={busy} disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())} icon={<Mail className="size-4" />}>
+            Recevoir mon code
           </Button>
           <p className="text-center text-xs text-faint">En continuant, vous acceptez les conditions d'utilisation de ToBe.</p>
         </form>
@@ -207,9 +213,11 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
           }}
           className="space-y-4"
         >
-          <p className="text-sm text-muted">Entrez le code à 6 chiffres envoyé au {phone.startsWith("+") ? phone : `+228 ${phone}`}.</p>
+          <p className="text-sm text-muted">
+            Entrez le code à 6 chiffres envoyé à <b className="text-ink">{email.trim()}</b>. Pensez à regarder dans les courriers indésirables.
+          </p>
           {devCode && (
-            <div className="rounded-2xl border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-gold">
+            <div className="rounded-2xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm text-brand">
               {isDemo ? "Version de démonstration" : "Mode développement"} : votre code est <b className="tracking-widest">{devCode}</b>
             </div>
           )}
@@ -227,8 +235,8 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
           <Button full type="submit" loading={busy} disabled={code.length !== 6}>
             Valider
           </Button>
-          <button type="button" className="w-full text-sm text-muted" onClick={() => setStep("phone")}>
-            Changer de numéro
+          <button type="button" className="w-full text-sm text-muted" onClick={() => setStep("email")}>
+            Changer d'adresse
           </button>
         </form>
       )}

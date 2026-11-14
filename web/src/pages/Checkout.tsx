@@ -14,7 +14,7 @@ import { useLoad } from "../lib/useLoad";
 export function Checkout() {
   const { id = "" } = useParams();
   const nav = useNavigate();
-  const { requireAuth, toast, refresh } = useSession();
+  const { requireAuth, toast, refresh, payments } = useSession();
   const code = sessionStorage.getItem(`code:${id}`) ?? "";
   const { data: e, error, loading } = useLoad(() => api<EventView>("GET", `/events/${id}`, undefined, { code }), [id]);
   const [typeId, setTypeId] = useState("");
@@ -37,7 +37,8 @@ export function Checkout() {
 
   const tt = e.ticketTypes.find((t) => t.id === typeId) ?? e.ticketTypes[0];
   const paid = (tt?.price ?? 0) > 0;
-  const fee = paid ? ticketFee(tt.price, e.organizerPro) * qty : 0;
+  const online = paid && payments;
+  const fee = online ? ticketFee(tt.price, e.organizerPro) * qty : 0;
   const subtotal = (tt?.price ?? 0) * qty;
   const left = tt?.quota ? tt.quota - tt.sold : Infinity;
 
@@ -45,9 +46,9 @@ export function Checkout() {
     if (!(await requireAuth("Connectez-vous pour recevoir votre billet sur votre téléphone."))) return;
     setBusy(true);
     try {
-      const o = await api<Order>("POST", `/events/${e.slug}/tickets`, { ticketTypeId: tt.id, qty, method: paid ? method : "cash", code });
+      const o = await api<Order>("POST", `/events/${e.slug}/tickets`, { ticketTypeId: tt.id, qty, method: online ? method : "cash", code });
       await refresh();
-      toast(paid ? "Paiement confirmé" : "Place réservée");
+      toast(online ? "Paiement confirmé" : qty > 1 ? "Places réservées" : "Place réservée");
       nav(`/billet/${o.id}?nouveau=1`, { replace: true });
     } catch (err) {
       toast((err as Error).message, "error");
@@ -56,8 +57,8 @@ export function Checkout() {
   };
 
   return (
-    <div className="pb-32">
-      <TopBar title={paid ? "Prendre mes billets" : "Réserver"} />
+    <div className="pb-32 lg:pb-12">
+      <TopBar title={online ? "Prendre mes billets" : "Réserver"} />
       <div className="px-5 pt-4">
         <div className="flex items-center gap-3 rounded-2xl border border-line bg-card p-2.5">
           <Poster cover={e.cover} theme={e.theme} category={e.category} className="size-16 shrink-0 rounded-xl" />
@@ -77,7 +78,7 @@ export function Checkout() {
                 key={t.id}
                 disabled={soldOut}
                 onClick={() => (setTypeId(t.id), setQty(1))}
-                className={cx("flex w-full items-center justify-between rounded-2xl border p-4 text-left transition disabled:opacity-40", tt?.id === t.id ? "border-gold bg-gold/10" : "border-line bg-card")}
+                className={cx("flex w-full items-center justify-between rounded-2xl border p-4 text-left transition disabled:opacity-40", tt?.id === t.id ? "border-brand bg-brand/10" : "border-line bg-card")}
               >
                 <div>
                   <div className="font-semibold">{t.name}</div>
@@ -102,7 +103,15 @@ export function Checkout() {
           </div>
         </div>
 
-        {paid && (
+        {paid && !online && (
+          <div className="mt-6 space-y-2 rounded-2xl border border-line bg-card p-4 text-sm">
+            <Row label={`${qty} × ${tt.name}`} value={formatFcfa(subtotal)} />
+            <div className="my-2 border-t border-line" />
+            <Row label={<b>À régler à l'entrée</b>} value={<b className="font-display text-lg text-brand">{formatFcfa(subtotal)}</b>} />
+            <p className="pt-1 text-xs text-muted">Votre place est réservée à votre nom. Vous payez le jour J, à l'entrée, sur présentation du QR code.</p>
+          </div>
+        )}
+        {online && (
           <>
             <h2 className="mb-3 mt-6 text-base font-bold">Paiement</h2>
             <PayPicker value={method} onChange={setMethod} />
@@ -110,7 +119,7 @@ export function Checkout() {
               <Row label={`${qty} × ${tt.name}`} value={formatFcfa(subtotal)} />
               <Row label="Frais de service" value={formatFcfa(fee)} />
               <div className="my-2 border-t border-line" />
-              <Row label={<b>Total</b>} value={<b className="font-display text-lg text-gold">{formatFcfa(subtotal + fee)}</b>} />
+              <Row label={<b>Total</b>} value={<b className="font-display text-lg text-brand">{formatFcfa(subtotal + fee)}</b>} />
             </div>
           </>
         )}
@@ -118,9 +127,9 @@ export function Checkout() {
           <ShieldCheck className="size-4 text-emerald" /> Billet nominatif avec QR code, disponible hors connexion.
         </p>
       </div>
-      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
+      <div className="absolute inset-x-0 bottom-0 z-30 border-t border-line bg-app/95 lg:static lg:mt-8 lg:rounded-3xl lg:border lg:bg-card-2 lg:p-4 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
         <Button full size="lg" loading={busy} onClick={submit} disabled={!tt}>
-          {paid ? `Payer ${formatFcfa(subtotal + fee)}` : qty > 1 ? `Réserver ${qty} places` : "Réserver ma place"}
+          {online ? `Payer ${formatFcfa(subtotal + fee)}` : qty > 1 ? `Réserver ${qty} places` : "Réserver ma place"}
         </Button>
       </div>
     </div>

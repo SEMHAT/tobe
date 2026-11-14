@@ -62,7 +62,7 @@ interface Dashboard {
 const TOBE_STATUS: Record<string, string> = { nouveau: "Demande envoyée", contacte: "Conseiller en contact", devis: "Devis envoyé", signe: "Organisation confirmée", perdu: "Demande close" };
 
 export function Organizer() {
-  const { me, ready, requireAuth } = useSession();
+  const { me, ready, requireAuth, payments } = useSession();
   const { data, error, loading, reload } = useLoad(async () => (me ? api<Dashboard>("GET", "/organizer") : null), [me?.user.id]);
   if (!ready) return <PageLoader />;
   if (!me)
@@ -74,12 +74,12 @@ export function Organizer() {
     );
   return (
     <div className="pb-8">
-      <TopBar title="Espace organisateur" right={<Link to="/creer" aria-label="Créer" className="grid size-10 place-items-center rounded-full gold-gradient text-[#1b1206]"><Plus className="size-5" /></Link>} />
+      <TopBar title="Espace organisateur" right={<Link to="/creer" aria-label="Créer" className="grid size-10 place-items-center rounded-full brand-gradient text-white"><Plus className="size-5" /></Link>} />
       {loading && <PageLoader />}
       {error && <ErrorState message={error.message} onRetry={reload} />}
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-3 px-5 pt-4">
+          <div className="grid grid-cols-2 gap-3 px-5 pt-4 lg:grid-cols-4 lg:px-0">
             <Stat label="Recettes nettes" value={formatFcfa(data.totals.revenue)} />
             <Stat label="Billets" value={compact(data.totals.sold)} />
             <Stat label="Vues" value={compact(data.totals.views)} />
@@ -88,8 +88,8 @@ export function Organizer() {
           {data.events.length === 0 ? (
             <Empty icon={<Sparkles className="size-7" />} title="Aucun événement" text="Publiez votre premier événement en 2 minutes." action={<Link to="/creer"><Button>Créer un événement</Button></Link>} />
           ) : (
-            <div className="space-y-3 px-5 pt-6">
-              <h2 className="text-lg font-bold">Mes événements</h2>
+            <div className="space-y-3 px-5 pt-6 lg:grid lg:grid-cols-2 lg:gap-5 lg:space-y-0 lg:px-0">
+              <h2 className="text-lg font-bold lg:col-span-2">Mes événements</h2>
               {data.events.map((r) => (
                 <Link key={r.event.id} to={`/organisateur/${r.event.id}`} className="block rounded-[20px] border border-line bg-card p-3">
                   <div className="flex items-center gap-3">
@@ -122,7 +122,7 @@ export function Organizer() {
               ))}
             </div>
           )}
-          {!data.pro && <ProCard onDone={reload} />}
+          {!data.pro && payments && <ProCard onDone={reload} />}
         </>
       )}
     </div>
@@ -133,9 +133,9 @@ function ProCard({ onDone }: { onDone: () => void }) {
   const { toast, refresh } = useSession();
   const [busy, setBusy] = useState(false);
   return (
-    <div className="mx-5 mt-6 rounded-[22px] border border-gold/30 bg-gradient-to-br from-gold/10 to-transparent p-5">
+    <div className="mx-5 mt-6 rounded-[22px] border border-brand/30 bg-gradient-to-br from-brand/10 to-transparent p-5">
       <div className="flex items-center gap-2 font-display text-lg font-bold">
-        <Crown className="size-5 text-gold" /> Organisateur Pro
+        <Crown className="size-5 text-brand" /> Organisateur Pro
       </div>
       <p className="mt-1 text-sm text-muted">Badge vérifié, frais billetterie réduits à 4 % pour vos participants, statistiques détaillées.</p>
       <Button
@@ -164,7 +164,7 @@ function ProCard({ onDone }: { onDone: () => void }) {
 export function OrganizerEvent() {
   const { id = "" } = useParams();
   const nav = useNavigate();
-  const { me, toast } = useSession();
+  const { me, toast, payments } = useSession();
   const { data: dash, reload } = useLoad(async () => (me ? api<Dashboard>("GET", "/organizer") : null), [me?.user.id]);
   const { data: ev, error, setData: setEv } = useLoad(() => api<EventView>("GET", `/events/${id}`), [id, me?.user.id]);
   const [boostOpen, setBoostOpen] = useState(false);
@@ -195,7 +195,7 @@ export function OrganizerEvent() {
 
         <div className="mt-4 grid grid-cols-2 gap-3">
           <Stat label="Billets vendus" value={compact(r.sold)} sub={r.capacity ? `sur ${compact(r.capacity)}` : undefined} />
-          <Stat label="Recettes billets" value={formatFcfa(r.ticketRevenue)} sub="versées après l'événement" />
+          <Stat label={payments ? "Recettes billets" : "Billets à encaisser"} value={formatFcfa(r.ticketRevenue)} sub={payments ? "versées après l'événement" : "payés à l'entrée"} />
           <Stat label="Entrées scannées" value={`${r.scanned}/${r.sold}`} />
           <Stat label="Vues" value={compact(r.views)} sub={`Score d'impact ${ev.impact.score}/100`} />
         </div>
@@ -211,7 +211,7 @@ export function OrganizerEvent() {
             <div className="flex h-24 items-end gap-1.5">
               {r.salesByDay.slice(-14).map((d) => (
                 <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
-                  <div className="w-full rounded-t-md gold-gradient" style={{ height: `${(d.qty / maxDay) * 80 + 4}px` }} title={`${d.qty} billets`} />
+                  <div className="w-full rounded-t-md brand-gradient" style={{ height: `${(d.qty / maxDay) * 80 + 4}px` }} title={`${d.qty} billets`} />
                   <span className="text-[9px] text-faint">{d.day.slice(8)}</span>
                 </div>
               ))}
@@ -223,7 +223,7 @@ export function OrganizerEvent() {
         <div className="grid grid-cols-2 gap-3">
           <Action icon={<ScanLine />} label="Scanner les billets" onClick={() => nav(`/scanner?event=${ev.id}`)} />
           <Action icon={<ImagePlus />} label="Déposer les photos" sub={`${r.photos} en ligne`} onClick={() => setPhotosOpen(true)} />
-          <Action icon={<Rocket />} label="Booster" sub={ev.boostedUntil && new Date(ev.boostedUntil) > new Date() ? "Boost actif" : "Passer en tête"} onClick={() => setBoostOpen(true)} />
+          {payments && <Action icon={<Rocket />} label="Booster" sub={ev.boostedUntil && new Date(ev.boostedUntil) > new Date() ? "Boost actif" : "Passer en tête"} onClick={() => setBoostOpen(true)} />}
           <Action icon={<Share2 />} label="Partager" sub="WhatsApp" onClick={() => window.open(whatsappLink(`${ev.title} — ${shortDate(ev.startsAt)}, ${ev.venue}. Sur ToBe : ${url}`), "_blank")} />
           <Action icon={<Radio />} label="Direct vidéo" sub={ev.liveUrl ? "Lien ajouté" : "Ajouter le lien"} onClick={() => setLiveOpen(true)} />
           <Action icon={<Eye />} label="Voir la page" onClick={() => nav(eventPath(ev))} />
@@ -235,12 +235,12 @@ export function OrganizerEvent() {
               <div className="text-xs text-muted">Code d'accès des invités</div>
               <div className="font-mono text-xl font-bold tracking-widest">{ev.accessCode}</div>
             </div>
-            <Lock className="size-5 text-gold" />
+            <Lock className="size-5 text-brand" />
           </div>
         )}
         {r.contestId && (
           <Link to={`/vote/${r.contestId}`} className="mt-3 flex items-center gap-3 rounded-2xl border border-line bg-card p-4">
-            <Crown className="size-5 text-gold" />
+            <Crown className="size-5 text-brand" />
             <span className="flex-1">
               <span className="block font-semibold">Votes : {compact(r.votes)}</span>
               <span className="text-xs text-muted">Recettes nettes {formatFcfa(r.voteRevenue)}</span>
@@ -250,7 +250,7 @@ export function OrganizerEvent() {
         {r.contestId && <ContestAdmin contestId={r.contestId} />}
         {r.cagnotte && r.cagnotteId && (
           <Link to={`/cagnotte/${r.cagnotteId}`} className="mt-3 flex items-center gap-3 rounded-2xl border border-line bg-card p-4">
-            <HandCoins className="size-5 text-gold" />
+            <HandCoins className="size-5 text-brand" />
             <span className="flex-1">
               <span className="block font-semibold">Cagnotte : {formatFcfa(r.cagnotte.collected)}</span>
               <span className="text-xs text-muted">Net reversé {formatFcfa(r.cagnotte.net)}</span>
@@ -258,8 +258,8 @@ export function OrganizerEvent() {
           </Link>
         )}
         {r.tobeRequest && (
-          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-gold/40 bg-gold/10 p-4">
-            <Sparkles className="size-5 text-gold" />
+          <div className="mt-3 flex items-center gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-4">
+            <Sparkles className="size-5 text-brand" />
             <span className="flex-1 text-sm">
               <b>Agence ToBe :</b> {TOBE_STATUS[r.tobeRequest] ?? r.tobeRequest}
             </span>
@@ -297,7 +297,7 @@ export function OrganizerEvent() {
 function Action({ icon, label, sub, onClick }: { icon: React.ReactNode; label: string; sub?: string; onClick: () => void }) {
   return (
     <button onClick={onClick} className="flex flex-col items-start gap-2 rounded-2xl border border-line bg-card p-4 text-left transition active:scale-[0.98]">
-      <span className="text-gold [&>svg]:size-6">{icon}</span>
+      <span className="text-brand [&>svg]:size-6">{icon}</span>
       <span className="text-sm font-semibold leading-tight">{label}</span>
       {sub && <span className="-mt-1 text-xs text-muted">{sub}</span>}
     </button>
@@ -341,9 +341,9 @@ function BoostSheet({ open, onClose, eventId, onDone }: { open: boolean; onClose
     <Sheet open={open} onClose={onClose} title="Booster la visibilité">
       <div className="space-y-4">
         {(Object.entries(PRICING.boosts) as [BoostPlan, (typeof PRICING.boosts)[BoostPlan]][]).map(([k, b]) => (
-          <button key={k} onClick={() => setPlan(k)} className={cx("flex w-full items-center justify-between rounded-2xl border p-4 text-left", plan === k ? "border-gold bg-gold/10" : "border-line bg-card")}>
+          <button key={k} onClick={() => setPlan(k)} className={cx("flex w-full items-center justify-between rounded-2xl border p-4 text-left", plan === k ? "border-brand bg-brand/10" : "border-line bg-card")}>
             <span className="font-semibold">{b.label}</span>
-            <span className="font-display font-bold text-gold">{formatFcfa(b.price)}</span>
+            <span className="font-display font-bold text-brand">{formatFcfa(b.price)}</span>
           </button>
         ))}
         <PayPicker value={method} onChange={setMethod} />
@@ -445,9 +445,9 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
       <div className="space-y-4">
         <p className="text-sm text-muted">Les visages sont détectés sur votre appareil. Chaque participant qui a activé son Pass ToBe est prévenu automatiquement.</p>
         {!progress && (
-          <label className="flex h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-2 border-dashed border-gold/40 bg-gold/5 text-center">
+          <label className="flex h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-2 border-dashed border-brand/40 bg-brand/5 text-center">
             <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => run(e.target.files)} />
-            <Camera className="size-8 text-gold" />
+            <Camera className="size-8 text-brand" />
             <span className="font-semibold">Choisir les photos</span>
             <span className="text-xs text-muted">JPEG ou PNG, autant que vous voulez</span>
           </label>
@@ -474,7 +474,7 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
   );
 }
 
-type ScanResult = { ok: true; holder: string; remaining: number; eventTitle: string; order: { ticketTypeName: string; qty: number } } | { ok: false; reason: string };
+type ScanResult = { ok: true; holder: string; remaining: number; eventTitle: string; amountDue: number; order: { ticketTypeName: string; qty: number } } | { ok: false; reason: string };
 
 export function Scanner() {
   const [sp] = useSearchParams();
@@ -549,8 +549,8 @@ export function Scanner() {
         {mode === "camera" ? (
           <div className="relative aspect-square overflow-hidden rounded-[28px] bg-black">
             <video ref={video} playsInline muted className="size-full object-cover" />
-            <div className="pointer-events-none absolute inset-[16%] rounded-3xl border-[3px] border-gold shadow-[0_0_0_999px_rgba(0,0,0,0.5)]" />
-            <div className="scanline pointer-events-none absolute inset-x-[18%] h-0.5 bg-gold shadow-[0_0_14px_#f2b233]" />
+            <div className="pointer-events-none absolute inset-[16%] rounded-3xl border-[3px] border-brand shadow-[0_0_0_999px_rgba(0,0,0,0.5)]" />
+            <div className="scanline pointer-events-none absolute inset-x-[18%] h-0.5 bg-brand shadow-[0_0_14px_#1800ad]" />
             <QrCode className="absolute bottom-4 left-1/2 size-6 -translate-x-1/2 text-white/60" />
           </div>
         ) : (
@@ -581,6 +581,7 @@ export function Scanner() {
             {result.ok ? (
               <div className="mt-1 text-white/90">
                 {result.holder} · {result.order.qty} × {result.order.ticketTypeName}
+                {result.amountDue > 0 && <div className="mt-2 rounded-xl bg-white/20 px-3 py-2 text-lg font-bold">À encaisser : {formatFcfa(result.amountDue)}</div>}
                 {result.remaining > 0 && <div className="font-semibold">Encore {result.remaining} entrée(s) sur ce billet</div>}
               </div>
             ) : (
@@ -589,7 +590,7 @@ export function Scanner() {
           </div>
         )}
         <div className="mt-6 flex items-center gap-2 rounded-2xl bg-card p-4 text-xs text-muted">
-          <Wallet className="size-4 shrink-0 text-gold" /> Chaque billet ne peut être validé qu'autant de fois qu'il compte de places.
+          <Wallet className="size-4 shrink-0 text-brand" /> Chaque billet ne peut être validé qu'autant de fois qu'il compte de places.
         </div>
       </div>
     </div>

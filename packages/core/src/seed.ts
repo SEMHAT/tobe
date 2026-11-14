@@ -1,7 +1,10 @@
 import type { Db } from "./db";
 import type { Cagnotte, Contest, Contribution, Provider, TobeEvent, User } from "./types";
 
-/** Données d'exemple (Lomé). Les dates sont calculées à partir d'aujourd'hui pour rester à venir. */
+/**
+ * Données d'exemple, réservées au développement local et aux tests automatiques.
+ * Jamais chargées en production (voir SEED côté serveur).
+ */
 export function seedDb(db: Db, now = new Date()) {
   if (db.events.size > 0) return;
   const day = (n: number, h = 20, m = 0) => {
@@ -14,10 +17,10 @@ export function seedDb(db: Db, now = new Date()) {
   const toSat = ((6 - now.getDay() + 7) % 7) || 7;
 
   const orgs: User[] = [
-    { id: "usr_org_afro", phone: "+22890000001", name: "Afro Lomé Events", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: true },
-    { id: "usr_org_miss", phone: "+22890000002", name: "Comité Miss Université", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: false },
-    { id: "usr_org_forum", phone: "+22890000003", name: "Réseau des Entrepreneurs", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: true },
-    { id: "usr_org_afi", phone: "+22890000004", name: "Afi & Koffi", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: false },
+    { id: "usr_org_afro", email: "usr_org_afro@exemple.test", phone: "+22890000001", name: "Afro Lomé Events", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: true },
+    { id: "usr_org_miss", email: "usr_org_miss@exemple.test", phone: "+22890000002", name: "Comité Miss Université", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: false },
+    { id: "usr_org_forum", email: "usr_org_forum@exemple.test", phone: "+22890000003", name: "Réseau des Entrepreneurs", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: true },
+    { id: "usr_org_afi", email: "usr_org_afi@exemple.test", phone: "+22890000004", name: "Afi & Koffi", createdAt: now.toISOString(), role: "user", passEnabled: false, faceDescriptor: null, neverShow: false, premiumUntil: null, pro: false },
   ];
   for (const u of orgs) db.users.insert(u);
 
@@ -356,16 +359,16 @@ export function seedDb(db: Db, now = new Date()) {
   });
 
   const providers: Provider[] = [
-    { id: "prv_1", name: "Kodjo Animation", category: "mc", city: "Lomé", rating: 4.9, reviews: 64, certified: true, bio: "Maître de cérémonie trilingue (français, éwé, anglais). Mariages, galas et conférences.", phone: "+22890000101", priceFrom: 75000, theme: "or" },
-    { id: "prv_2", name: "Studio Lumière d'Afrique", category: "photo", city: "Lomé", rating: 4.8, reviews: 112, certified: true, bio: "Photo et vidéo d'événements, aftermovies livrés en 72 h.", phone: "+22890000102", priceFrom: 120000, theme: "nuit" },
-    { id: "prv_3", name: "Déco Pagne & Fleurs", category: "deco", city: "Lomé", rating: 4.7, reviews: 48, certified: true, bio: "Décoration florale et scénographie inspirées des pagnes et du wax.", phone: "+22890000103", priceFrom: 150000, theme: "corail" },
-    { id: "prv_4", name: "SonoMax Togo", category: "son", city: "Lomé", rating: 4.6, reviews: 39, certified: false, bio: "Sonorisation, éclairage et écrans LED jusqu'à 5 000 personnes.", phone: "+22890000104", priceFrom: 200000, theme: "violet" },
-    { id: "prv_5", name: "Saveurs de Mama Akossiwa", category: "traiteur", city: "Lomé", rating: 4.9, reviews: 91, certified: true, bio: "Cuisine togolaise et internationale, buffets de 50 à 800 couverts.", phone: "+22890000105", priceFrom: 5000, theme: "vert" },
-    { id: "prv_6", name: "Garde d'Or Sécurité", category: "securite", city: "Lomé", rating: 4.5, reviews: 22, certified: false, bio: "Agents de sécurité et contrôle d'accès pour vos événements.", phone: "+22890000106", priceFrom: 25000, theme: "sobre" },
-    { id: "prv_7", name: "Atelier Kenté & Couture", category: "costume", city: "Lomé", rating: 4.8, reviews: 33, certified: true, bio: "Tenues de cérémonie, uniformes d'équipe et location de costumes.", phone: "+22890000107", priceFrom: 30000, theme: "or" },
-    { id: "prv_8", name: "Esso MC", category: "mc", city: "Kara", rating: 4.6, reviews: 18, certified: false, bio: "Animateur pour soirées et concerts dans le Nord.", phone: "+22890000108", priceFrom: 50000, theme: "corail" },
-    { id: "prv_9", name: "Logistique Express Lomé", category: "logistique", city: "Lomé", rating: 4.4, reviews: 27, certified: false, bio: "Chapiteaux, chaises, tables, podiums et transport de matériel.", phone: "+22890000109", priceFrom: 40000, theme: "nuit" },
-    { id: "prv_10", name: "Ama Vision Drone", category: "photo", city: "Lomé", rating: 4.7, reviews: 15, certified: true, bio: "Prises de vue aériennes et direct vidéo pour la diaspora.", phone: "+22890000110", priceFrom: 90000, theme: "violet" },
+    { id: "prv_1", ownerId: null, status: "approved", email: "prv_1@exemple.test", name: "Kodjo Animation", category: "mc", city: "Lomé", rating: 4.9, reviews: 64, certified: true, bio: "Maître de cérémonie trilingue (français, éwé, anglais). Mariages, galas et conférences.", phone: "+22890000101", priceFrom: 75000, theme: "or" },
+    { id: "prv_2", ownerId: null, status: "approved", email: "prv_2@exemple.test", name: "Studio Lumière d'Afrique", category: "photo", city: "Lomé", rating: 4.8, reviews: 112, certified: true, bio: "Photo et vidéo d'événements, aftermovies livrés en 72 h.", phone: "+22890000102", priceFrom: 120000, theme: "nuit" },
+    { id: "prv_3", ownerId: null, status: "approved", email: "prv_3@exemple.test", name: "Déco Pagne & Fleurs", category: "deco", city: "Lomé", rating: 4.7, reviews: 48, certified: true, bio: "Décoration florale et scénographie inspirées des pagnes et du wax.", phone: "+22890000103", priceFrom: 150000, theme: "corail" },
+    { id: "prv_4", ownerId: null, status: "approved", email: "prv_4@exemple.test", name: "SonoMax Togo", category: "son", city: "Lomé", rating: 4.6, reviews: 39, certified: false, bio: "Sonorisation, éclairage et écrans LED jusqu'à 5 000 personnes.", phone: "+22890000104", priceFrom: 200000, theme: "violet" },
+    { id: "prv_5", ownerId: null, status: "approved", email: "prv_5@exemple.test", name: "Saveurs de Mama Akossiwa", category: "traiteur", city: "Lomé", rating: 4.9, reviews: 91, certified: true, bio: "Cuisine togolaise et internationale, buffets de 50 à 800 couverts.", phone: "+22890000105", priceFrom: 5000, theme: "vert" },
+    { id: "prv_6", ownerId: null, status: "approved", email: "prv_6@exemple.test", name: "Garde d'Or Sécurité", category: "securite", city: "Lomé", rating: 4.5, reviews: 22, certified: false, bio: "Agents de sécurité et contrôle d'accès pour vos événements.", phone: "+22890000106", priceFrom: 25000, theme: "sobre" },
+    { id: "prv_7", ownerId: null, status: "approved", email: "prv_7@exemple.test", name: "Atelier Kenté & Couture", category: "costume", city: "Lomé", rating: 4.8, reviews: 33, certified: true, bio: "Tenues de cérémonie, uniformes d'équipe et location de costumes.", phone: "+22890000107", priceFrom: 30000, theme: "or" },
+    { id: "prv_8", ownerId: null, status: "approved", email: "prv_8@exemple.test", name: "Esso MC", category: "mc", city: "Kara", rating: 4.6, reviews: 18, certified: false, bio: "Animateur pour soirées et concerts dans le Nord.", phone: "+22890000108", priceFrom: 50000, theme: "corail" },
+    { id: "prv_9", ownerId: null, status: "approved", email: "prv_9@exemple.test", name: "Logistique Express Lomé", category: "logistique", city: "Lomé", rating: 4.4, reviews: 27, certified: false, bio: "Chapiteaux, chaises, tables, podiums et transport de matériel.", phone: "+22890000109", priceFrom: 40000, theme: "nuit" },
+    { id: "prv_10", ownerId: null, status: "approved", email: "prv_10@exemple.test", name: "Ama Vision Drone", category: "photo", city: "Lomé", rating: 4.7, reviews: 15, certified: true, bio: "Prises de vue aériennes et direct vidéo pour la diaspora.", phone: "+22890000110", priceFrom: 90000, theme: "violet" },
   ];
   for (const p of providers) db.providers.insert(p);
 }

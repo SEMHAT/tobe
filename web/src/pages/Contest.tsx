@@ -12,7 +12,7 @@ import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
 function modeLabel(c: ContestView) {
-  return c.mode === "free" ? "Vote gratuit" : c.mode === "paid" ? `Vote payant · ${formatFcfa(c.votePrice)}` : `1 vote gratuit / jour + packs`;
+  return c.mode === "free" ? "1 vote gratuit par jour" : c.mode === "paid" ? `Vote payant · ${formatFcfa(c.votePrice)}` : `1 vote gratuit par jour`;
 }
 
 export function ContestPage() {
@@ -32,11 +32,11 @@ export function ContestPage() {
   const podium = c.candidates.filter((x) => x.rank && x.rank <= 3).sort((a, b) => a.rank! - b.rank!);
   return (
     <div className="pb-10">
-      <TopBar title="Vote" right={<Link to={`/vote/${c.id}/certificat`} aria-label="Certificat" className="grid size-10 place-items-center rounded-full text-gold"><ShieldCheck className="size-5" /></Link>} />
-      <div className="relative mx-5 mt-3 overflow-hidden rounded-[24px] border border-line bg-gradient-to-br from-[#2a1440] via-[#1a1022] to-[#120d18] p-5 text-white">
+      <TopBar title="Vote" right={<Link to={`/vote/${c.id}/certificat`} aria-label="Certificat" className="grid size-10 place-items-center rounded-full text-brand"><ShieldCheck className="size-5" /></Link>} />
+      <div className="relative mx-5 mt-3 overflow-hidden rounded-[24px] bg-gradient-to-br from-[#07003a] via-[#12007a] to-[#1800ad] p-5 text-white lg:mx-0 lg:p-8">
         <div className="absolute -right-10 -top-10 size-44 rounded-full bg-violet/40 blur-3xl" />
         <div className="relative">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gold">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#cfc9ff]">
             <Crown className="size-4" /> {modeLabel(c)}
           </div>
           <h1 className="mt-2 text-[23px] font-extrabold leading-tight">{c.title}</h1>
@@ -44,7 +44,7 @@ export function ContestPage() {
             <span className="flex items-center gap-1.5">
               <Timer className="size-4" /> {c.isOpen ? `Fin dans ${countdown(c.closesAt)}` : "Clôturé"}
             </span>
-            {c.totalVotes !== null && <span className="font-semibold text-gold">{compact(c.totalVotes)} votes</span>}
+            {c.totalVotes !== null && <span className="font-semibold text-white">{compact(c.totalVotes)} votes</span>}
           </div>
           {c.juryWeight > 0 && <div className="mt-2 text-xs text-white/60">Résultat final : {100 - c.juryWeight} % public, {c.juryWeight} % jury</div>}
           {c.freeVoteAvailable && (
@@ -61,7 +61,7 @@ export function ContestPage() {
             <Link key={x.id} to={`/vote/${c.id}/candidat/${x.id}`} className="flex w-[30%] flex-col items-center">
               <Avatar name={x.name} src={x.photo} size={x.rank === 1 ? 78 : 62} ring={x.rank === 1} />
               <div className="mt-2 line-clamp-1 text-center text-sm font-semibold">{x.name.split(" ")[0]}</div>
-              <div className="text-xs font-semibold text-gold">{compact(x.votes ?? 0)}</div>
+              <div className="text-xs font-semibold text-brand">{compact(x.votes ?? 0)}</div>
               <div className={cx("mt-2 grid w-full place-items-center rounded-t-2xl bg-card", x.rank === 1 ? "h-20" : x.rank === 2 ? "h-14" : "h-10")}>
                 <TrophyMark rank={x.rank!} />
               </div>
@@ -70,11 +70,11 @@ export function ContestPage() {
         </div>
       )}
 
-      <div className="relative mx-5 mt-6">
+      <div className="relative mx-5 mt-6 lg:mx-0 lg:max-w-md">
         <Search className="absolute left-4 top-1/2 size-5 -translate-y-1/2 text-faint" />
         <input className={`${inputCls} pl-12`} placeholder="Nom ou numéro du candidat" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 px-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 px-5 lg:grid-cols-4 lg:gap-5 lg:px-0">
         {list.map((x) => (
           <CandidateTile key={x.id} contestId={c.id} x={x} />
         ))}
@@ -103,11 +103,11 @@ function CandidateTile({ contestId, x }: { contestId: string; x: CandidateView }
         )}
         <div className="absolute inset-x-3 bottom-2.5 text-white">
           <div className="line-clamp-1 font-display font-bold">{x.name}</div>
-          <div className="text-xs text-gold-2">{x.votes !== null ? `${compact(x.votes)} votes` : "Votes masqués"}</div>
+          <div className="text-xs font-semibold text-[#d9d4ff]">{x.votes !== null ? `${compact(x.votes)} votes` : "Votes masqués"}</div>
         </div>
       </div>
       <div className="p-2.5">
-        <div className="flex h-9 items-center justify-center gap-1.5 rounded-full gold-gradient text-sm font-bold text-[#1b1206]">
+        <div className="flex h-9 items-center justify-center gap-1.5 rounded-full brand-gradient text-sm font-bold text-white">
           <Crown className="size-4" /> Voter
         </div>
       </div>
@@ -117,7 +117,7 @@ function CandidateTile({ contestId, x }: { contestId: string; x: CandidateView }
 
 export function CandidatePage() {
   const { id = "", cid = "" } = useParams();
-  const { me, requireAuth, toast, refresh } = useSession();
+  const { me, requireAuth, toast, refresh, payments } = useSession();
   const { data: c, error, loading, setData } = useLoad(() => api<ContestView>("GET", `/contests/${id}`), [id, me?.user.id]);
   const [pack, setPack] = useState<"1" | "10" | "50" | null>(null);
   const [method, setMethod] = useState<PayMethod>("mixx");
@@ -162,7 +162,7 @@ export function CandidatePage() {
   };
 
   return (
-    <div className="pb-36">
+    <div className="pb-36 lg:mx-auto lg:max-w-xl">
       <div className="relative">
         <div className="relative aspect-[4/4.6] w-full overflow-hidden">
           {x.photo ? (
@@ -179,7 +179,7 @@ export function CandidatePage() {
         </div>
       </div>
       <div className="relative -mt-20 px-5">
-        <span className="inline-flex h-8 items-center rounded-full bg-gold px-3 font-display text-sm font-bold text-[#1b1206]">N° {x.number}</span>
+        <span className="inline-flex h-8 items-center rounded-full bg-brand px-3 font-display text-sm font-bold text-white">N° {x.number}</span>
         <h1 className="mt-2 text-[30px] font-extrabold leading-tight">{x.name}</h1>
         <p className="mt-1 text-muted">{x.bio}</p>
         <div className="mt-5 grid grid-cols-3 gap-2">
@@ -189,8 +189,8 @@ export function CandidatePage() {
         </div>
 
         {thanks > 0 && (
-          <div className="pop mt-5 flex items-center gap-3 rounded-2xl border border-gold/40 bg-gold/10 p-4">
-            <Trophy className="size-6 text-gold" />
+          <div className="pop mt-5 flex items-center gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-4">
+            <Trophy className="size-6 text-brand" />
             <div className="text-sm">
               <b>
                 Merci ! {thanks} vote{thanks > 1 ? "s" : ""} pour {x.name.split(" ")[0]}.
@@ -200,15 +200,15 @@ export function CandidatePage() {
           </div>
         )}
 
-        {c.isOpen && c.mode !== "free" && (
+        {c.isOpen && c.mode !== "free" && payments && (
           <div className="mt-6">
             <h2 className="mb-3 text-base font-bold">Soutenir avec un pack</h2>
             <div className="grid grid-cols-3 gap-2">
               {PRICING.votePacks.map((p) => (
-                <button key={p.id} onClick={() => setPack(p.id as "1" | "10" | "50")} className={cx("rounded-2xl border p-3 text-center transition", p.id === "10" ? "border-gold bg-gold/10" : "border-line bg-card")}>
+                <button key={p.id} onClick={() => setPack(p.id as "1" | "10" | "50")} className={cx("rounded-2xl border p-3 text-center transition", p.id === "10" ? "border-brand bg-brand/10" : "border-line bg-card")}>
                   <div className="font-display text-2xl font-extrabold">{p.votes}</div>
                   <div className="text-xs text-muted">vote{p.votes > 1 ? "s" : ""}</div>
-                  <div className="mt-1.5 text-sm font-bold text-gold">{formatFcfa(c.votePrice * p.factor)}</div>
+                  <div className="mt-1.5 text-sm font-bold text-brand">{formatFcfa(c.votePrice * p.factor)}</div>
                   {p.factor < p.votes && <div className="mt-1 text-[10px] font-bold uppercase text-emerald">-{Math.round((1 - p.factor / p.votes) * 100)} %</div>}
                 </button>
               ))}
@@ -220,10 +220,14 @@ export function CandidatePage() {
         </Link>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-30 space-y-2 border-t border-line bg-app/95 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
+      <div className="absolute inset-x-0 bottom-0 z-30 space-y-2 border-t border-line bg-app/95 lg:static lg:mt-8 lg:rounded-3xl lg:border lg:bg-card-2 lg:p-4 px-5 pb-[max(env(safe-area-inset-bottom),14px)] pt-3 backdrop-blur-xl">
         {!c.isOpen ? (
           <Button full size="lg" variant="dark" disabled>
             Vote clôturé
+          </Button>
+        ) : c.mode === "paid" && !payments ? (
+          <Button full size="lg" variant="dark" disabled>
+            Votes payants bientôt disponibles
           </Button>
         ) : c.mode === "paid" ? (
           <Button full size="lg" onClick={() => setPack("1")} icon={<Crown className="size-5" />}>
@@ -250,7 +254,7 @@ export function CandidatePage() {
                   {PRICING.votePacks.find((p) => p.id === pack)!.votes} vote(s)
                 </div>
               </div>
-              <div className="font-display text-lg font-bold text-gold">{formatFcfa(c.votePrice * PRICING.votePacks.find((p) => p.id === pack)!.factor)}</div>
+              <div className="font-display text-lg font-bold text-brand">{formatFcfa(c.votePrice * PRICING.votePacks.find((p) => p.id === pack)!.factor)}</div>
             </div>
             <PayPicker value={method} onChange={setMethod} />
             <Button full loading={busy} onClick={() => vote(pack)}>
@@ -317,7 +321,7 @@ export function CertificatePage() {
         {data.totalVotes > data.recordedVotes && <p className="mt-3 text-xs text-faint">Dont {(data.totalVotes - data.recordedVotes).toLocaleString("fr-FR")} votes importés au lancement du concours.</p>}
         <div className="mt-5 rounded-2xl bg-card-2 p-4">
           <div className="text-xs text-muted">Empreinte des {data.transactions} transactions enregistrées</div>
-          <div className="mt-1 break-all font-mono text-lg font-bold tracking-wider text-gold">{data.fingerprint}</div>
+          <div className="mt-1 break-all font-mono text-lg font-bold tracking-wider text-brand">{data.fingerprint}</div>
           <p className="mt-1 text-xs text-faint">Cette empreinte change si un seul vote est modifié : elle permet de vérifier que rien n'a été truqué.</p>
         </div>
         <ul className="mt-5 space-y-2 text-sm">

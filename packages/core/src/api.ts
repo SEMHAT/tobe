@@ -28,10 +28,11 @@ const need = (ctx: RouteCtx) => {
 
 export const routes: Route[] = [
   { method: "GET", path: "/health", handler: () => ({ ok: true, service: "tobe" }) },
+  { method: "GET", path: "/config", handler: (s) => s.config() },
 
   // Authentification
-  { method: "POST", path: "/auth/otp", handler: (s, c) => s.requestOtp(String(c.body?.phone ?? "")) },
-  { method: "POST", path: "/auth/verify", handler: (s, c) => s.verifyOtp(String(c.body?.phone ?? ""), String(c.body?.code ?? ""), c.body?.name) },
+  { method: "POST", path: "/auth/otp", handler: (s, c) => s.requestOtp(String(c.body?.email ?? "")) },
+  { method: "POST", path: "/auth/verify", handler: (s, c) => s.verifyOtp(String(c.body?.email ?? ""), String(c.body?.code ?? ""), c.body?.name) },
   { method: "POST", path: "/auth/logout", handler: (s, c) => (c.token && s.logout(c.token), { ok: true }) },
 
   // Compte
@@ -82,6 +83,9 @@ export const routes: Route[] = [
   // Organisateur, prestataires, agence
   { method: "GET", path: "/organizer", handler: (s, c) => s.organizerDashboard(need(c)) },
   { method: "GET", path: "/providers", handler: (s, c) => s.listProviders(c.query) },
+  { method: "POST", path: "/providers", handler: (s, c) => s.applyProvider(need(c), c.body ?? {}) },
+  { method: "GET", path: "/me/provider", handler: (s, c) => s.myProvider(need(c)) },
+  { method: "PATCH", path: "/admin/providers/:id", handler: (s, c) => s.setProviderStatus(need(c), c.params.id, c.body ?? {}) },
   { method: "POST", path: "/providers/:id/quote", handler: (s, c) => s.requestQuote(need(c), c.params.id, c.body ?? {}) },
   { method: "POST", path: "/tobe-requests", handler: (s, c) => s.requestTobe(need(c), c.body ?? {}) },
   { method: "GET", path: "/admin", handler: (s, c) => s.adminOverview(need(c)) },

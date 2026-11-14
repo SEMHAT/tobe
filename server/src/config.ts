@@ -9,10 +9,12 @@ export const config = {
   /** Dossier du frontend compilé (web/dist) : le serveur le sert aussi, pour un seul déploiement. */
   webDir: process.env.WEB_DIR ? path.resolve(process.env.WEB_DIR) : path.resolve(import.meta.dirname, "../../web/dist"),
   corsOrigins: list(process.env.CORS_ORIGINS ?? "http://localhost:5173,https://tobe.eledji.com"),
-  adminPhones: list(process.env.ADMIN_PHONES),
-  /** En production, laisser à false : le code n'est envoyé que par SMS. */
+  adminEmails: list(process.env.ADMIN_EMAILS),
+  paymentsEnabled: process.env.PAYMENTS_ENABLED === "true",
+  /** En production, laisser à false : le code n'est envoyé que par e-mail. */
   exposeOtp: process.env.EXPOSE_OTP === "true" || process.env.NODE_ENV !== "production",
   demo: process.env.DEMO === "true",
-  seed: process.env.SEED !== "false",
+  /** Données d'exemple : uniquement en développement (SEED=true). */
+  seed: process.env.SEED === "true",
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 8),
 };

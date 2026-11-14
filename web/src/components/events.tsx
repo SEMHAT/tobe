@@ -23,7 +23,7 @@ export function HeroCard({ e }: { e: EventCard }) {
           {e.boosted && <span className="rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/75 backdrop-blur">Sponsorisé</span>}
         </div>
         <div className="absolute inset-x-4 bottom-4 text-white">
-          <div className="text-[13px] font-semibold text-gold-2">{shortDate(e.startsAt)}</div>
+          <div className="text-[13px] font-bold text-[#cfc9ff]">{shortDate(e.startsAt)}</div>
           <div className="mt-1 font-display text-[22px] font-bold leading-tight">{e.title}</div>
           <div className="mt-1.5 flex items-center gap-1.5 text-[13px] text-white/75">
             <MapPin className="size-3.5" />
@@ -48,8 +48,8 @@ export function HeroCard({ e }: { e: EventCard }) {
 
 export function TileCard({ e, wide }: { e: EventCard; wide?: boolean }) {
   return (
-    <Link to={eventPath(e)} className={cx("block shrink-0", wide ? "w-full" : "w-[62%]")}>
-      <Poster cover={e.cover} theme={e.theme} category={e.category} title={e.title} className="aspect-[16/11] rounded-[20px]">
+    <Link to={eventPath(e)} className={cx("group block shrink-0", wide ? "w-full" : "w-[62%]")}>
+      <Poster cover={e.cover} theme={e.theme} category={e.category} title={e.title} className="aspect-[16/11] rounded-[20px] transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_24px_40px_-24px_rgba(11,11,18,0.6)]">
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         <div className="absolute left-3 top-3">
           <TierBadge tier={e.impact.tier} />
@@ -78,8 +78,8 @@ export function RowCard({ e }: { e: EventCard }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <TierBadge tier={e.impact.tier} className="h-5 px-2 text-[10px]" />
-          {e.hasVotes && <Crown className="size-4 text-gold" aria-label="Votes" />}
-          {e.hasCagnotte && <HandCoins className="size-4 text-gold" aria-label="Cagnotte" />}
+          {e.hasVotes && <Crown className="size-4 text-brand" aria-label="Votes" />}
+          {e.hasCagnotte && <HandCoins className="size-4 text-brand" aria-label="Cagnotte" />}
         </div>
         <div className="mt-1 line-clamp-1 font-display text-[15px] font-bold">{e.title}</div>
         <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-muted">

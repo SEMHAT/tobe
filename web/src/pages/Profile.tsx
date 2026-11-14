@@ -14,6 +14,7 @@ export function Profile() {
   const { me, ready, requireAuth, logout, theme, setTheme, refresh, toast } = useSession();
   const [edit, setEdit] = useState(false);
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [install, setInstall] = useState<InstallEvt | null>(null);
   useEffect(() => {
     const h = (e: Event) => (e.preventDefault(), setInstall(e as InstallEvt));
@@ -24,20 +25,21 @@ export function Profile() {
 
   return (
     <div className="pt-safe">
-      <header className="px-5 pt-4">
+      <header className="px-5 pt-4 lg:px-0">
         <h1 className="text-[26px] font-extrabold">Profil</h1>
       </header>
       {me ? (
         <div className="mx-5 mt-4 rounded-[24px] border border-line bg-card p-5">
           <div className="flex items-center gap-4">
-            <Avatar name={me.user.name || "?"} size={64} ring={me.premium} />
+            <Avatar name={me.user.name || me.user.email} size={64} ring={me.premium} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 truncate font-display text-xl font-bold">
-                {me.user.name || "Sans nom"} {me.premium && <Crown className="size-5 text-gold" />}
+                {me.user.name || "Sans nom"} {me.premium && <Crown className="size-5 text-brand" />}
               </div>
-              <div className="text-sm text-muted">{formatPhone(me.user.phone)}</div>
+              <div className="truncate text-sm text-muted">{me.user.email}</div>
+              {me.user.phone && <div className="text-sm text-muted">{formatPhone(me.user.phone)}</div>}
             </div>
-            <button aria-label="Modifier le nom" onClick={() => (setName(me.user.name), setEdit(true))} className="grid size-10 place-items-center rounded-full bg-card-2">
+            <button aria-label="Modifier mon profil" onClick={() => (setName(me.user.name), setPhone(me.user.phone ?? ""), setEdit(true))} className="grid size-10 place-items-center rounded-full bg-card-2">
               <Pencil className="size-4" />
             </button>
           </div>
@@ -54,12 +56,12 @@ export function Profile() {
               </div>
             ))}
           </div>
-          {me.premium && me.user.premiumUntil && <div className="mt-3 text-center text-xs text-gold">Pass Premium jusqu'au {longDate(me.user.premiumUntil)}</div>}
+          {me.premium && me.user.premiumUntil && <div className="mt-3 text-center text-xs text-brand">Pass Premium jusqu'au {longDate(me.user.premiumUntil)}</div>}
         </div>
       ) : (
         <div className="mx-5 mt-4 rounded-[24px] border border-line bg-card p-6 text-center">
           <Logo className="text-2xl" />
-          <p className="mt-3 text-sm text-muted">Connectez-vous avec votre numéro pour garder vos billets, voter et retrouver vos photos.</p>
+          <p className="mt-3 text-sm text-muted">Connectez-vous avec votre e-mail pour garder vos billets, voter et retrouver vos photos.</p>
           <Button full className="mt-5" onClick={() => requireAuth()}>
             Se connecter
           </Button>
@@ -71,13 +73,13 @@ export function Profile() {
         <Item to="/photos" icon={<ScanFace />} label="Mes photos et Pass ToBe" />
         {me && <Item to="/notifications" icon={<Bell />} label="Notifications" badge={me.unread} />}
         <Item to="/organisateur" icon={<BriefcaseBusiness />} label="Espace organisateur" sub={me?.stats.organized ? `${me.stats.organized} événement(s)` : undefined} />
-        <Item to="/prestataires" icon={<Store />} label="Prestataires certifiés" />
+        <Item to="/prestataires" icon={<Store />} label="Prestataires" />
         {me?.user.role === "admin" && <Item to="/tobe" icon={<Sparkles />} label="Espace agence ToBe" sub="Demandes d'organisation, revenus" />}
       </div>
 
       <div className="mx-5 mt-4 overflow-hidden rounded-[22px] border border-line bg-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
-          <span className="text-gold [&>svg]:size-5">
+          <span className="text-brand [&>svg]:size-5">
             <Moon />
           </span>
           <span className="flex-1 font-medium">Mode sombre</span>
@@ -85,7 +87,7 @@ export function Profile() {
         </div>
         {install && (
           <button onClick={() => install.prompt().then(() => setInstall(null))} className="flex w-full items-center gap-3 border-t border-line px-4 py-3.5 text-left">
-            <span className="text-gold [&>svg]:size-5">
+            <span className="text-brand [&>svg]:size-5">
               <Download />
             </span>
             <span className="flex-1 font-medium">Installer l'application</span>
@@ -102,7 +104,7 @@ export function Profile() {
             }}
             className="flex w-full items-center gap-3 border-t border-line px-4 py-3.5 text-left"
           >
-            <span className="text-gold [&>svg]:size-5">
+            <span className="text-brand [&>svg]:size-5">
               <RotateCcw />
             </span>
             <span className="flex-1 font-medium">Réinitialiser la démo</span>
@@ -119,19 +121,26 @@ export function Profile() {
         ToBe · Sois-y. Retrouve-toi. {isDemo && "· Version de démonstration"}
       </p>
 
-      <Sheet open={edit} onClose={() => setEdit(false)} title="Mon nom">
+      <Sheet open={edit} onClose={() => setEdit(false)} title="Mon profil">
         <form
           className="space-y-4"
           onSubmit={async (e) => {
             e.preventDefault();
-            await api("PATCH", "/me", { name });
-            await refresh();
-            setEdit(false);
-            toast("Nom mis à jour");
+            try {
+              await api("PATCH", "/me", { name, phone: phone.trim() || null });
+              await refresh();
+              setEdit(false);
+              toast("Profil mis à jour");
+            } catch (err) {
+              toast((err as Error).message, "error");
+            }
           }}
         >
           <Field label="Prénom et nom">
             <input autoFocus className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Téléphone (facultatif)" hint="Utile pour les organisateurs et l'équipe ToBe.">
+            <input type="tel" inputMode="tel" className={inputCls} placeholder="90 12 34 56" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
           <Button full type="submit" disabled={name.trim().length < 2}>
             Enregistrer
@@ -145,7 +154,7 @@ export function Profile() {
 function Item({ to, icon, label, sub, badge }: { to: string; icon: ReactNode; label: string; sub?: string; badge?: number }) {
   return (
     <Link to={to} className="flex items-center gap-3 border-b border-line px-4 py-3.5 last:border-b-0">
-      <span className="text-gold [&>svg]:size-5">{icon}</span>
+      <span className="text-brand [&>svg]:size-5">{icon}</span>
       <span className="flex-1">
         <span className="block font-medium">{label}</span>
         {sub && <span className="block text-xs text-muted">{sub}</span>}
@@ -181,7 +190,7 @@ export function Notifications() {
       <div className="space-y-2 px-5 py-4">
         {data?.map((n) => (
           <button key={n.id} onClick={() => nav(n.link)} className="flex w-full gap-3 rounded-2xl border border-line bg-card p-4 text-left">
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-gold/15 text-gold">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/15 text-brand">
               <ScanFace className="size-5" />
             </span>
             <span className="min-w-0 flex-1">

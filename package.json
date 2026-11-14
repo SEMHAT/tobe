@@ -15,10 +15,21 @@
     "build": "npm run build -w web",
     "build:demo": "npm run build:demo -w web && rm -rf dist && cp -r web/dist dist",
     "start": "npm run start -w server",
-    "test": "npm run test -w packages/core && npm run test -w server",
-    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w server && npm run typecheck -w web"
+    "test": "npm run test -w packages/core && npm run test -w server && node --test --import tsx api/_lib/*.test.ts",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w server && npm run typecheck -w web && tsc -p api/tsconfig.json",
+    "build:vercel": "npm run build -w web && rm -rf dist && cp -r web/dist dist"
   },
   "engines": {
     "node": ">=22.13"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0",
+    "@vercel/blob": "^1.1.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3"
   }
 }

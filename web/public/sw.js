@@ -1,5 +1,5 @@
 // Service worker minimal : l'application s'ouvre même hors connexion (billets déjà chargés).
-const CACHE = "tobe-v1";
+const CACHE = "tobe-v2";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon-192.png"])).then(() => self.skipWaiting()));
 });

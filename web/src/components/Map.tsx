@@ -24,7 +24,7 @@ export function EventMap({ points, height = 420, zoom = 13, interactive = true }
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
     const icon = L.divIcon({
       className: "",
-      html: '<div style="width:34px;height:34px;border-radius:12px 12px 12px 3px;transform:rotate(-45deg);background:linear-gradient(135deg,#ffd27a,#f2b233 45%,#e8891c);box-shadow:0 6px 18px rgba(0,0,0,.45);border:3px solid #0e0e12"></div>',
+      html: '<div style="width:34px;height:34px;border-radius:12px 12px 12px 3px;transform:rotate(-45deg);background:linear-gradient(135deg,#3f2cff,#1800ad 55%,#0f0078);box-shadow:0 6px 18px rgba(0,0,0,.45);border:3px solid #ffffff"></div>',
       iconSize: [34, 34],
       iconAnchor: [6, 34],
     });
@@ -34,7 +34,7 @@ export function EventMap({ points, height = 420, zoom = 13, interactive = true }
       bounds.push([p.lat, p.lng]);
       if (interactive) {
         const div = document.createElement("div");
-        div.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:2px">${p.title.replace(/</g, "&lt;")}</div><div style="font-size:12px;color:#666">${p.sub.replace(/</g, "&lt;")}</div><div style="margin-top:6px;font-weight:700;color:#c47c06">Voir l'événement →</div>`;
+        div.innerHTML = `<div style="font-weight:700;font-size:14px;margin-bottom:2px">${p.title.replace(/</g, "&lt;")}</div><div style="font-size:12px;color:#666">${p.sub.replace(/</g, "&lt;")}</div><div style="margin-top:6px;font-weight:700;color:#1800ad">Voir l'événement →</div>`;
         div.style.cursor = "pointer";
         div.onclick = () => nav(p.link);
         m.bindPopup(div);
