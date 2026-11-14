@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDb, seedDb, ToBeService, computeImpact, ticketFee, normalizePhone, normalizeEmail, ApiError } from "./index";
+import { createDb, seedDb, ToBeService, computeImpact, ticketFee, normalizePhone, normalizeEmail, ApiError } from "./index.js";
 
 function setup(opts: { demo?: boolean; payments?: boolean } = {}) {
   const db = createDb();

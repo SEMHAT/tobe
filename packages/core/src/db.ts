@@ -14,7 +14,7 @@ import type {
   TobeRequest,
   User,
   VoteRecord,
-} from "./types";
+} from "./types.js";
 
 /** Ce qu'un stockage doit savoir faire : le backend écrit dans SQLite, le mode démo dans le navigateur. */
 export interface Persistence {

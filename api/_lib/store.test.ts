@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
-import { runApi, sessionUser, type PgPool } from "./store";
+import { runApi, sessionUser, type PgPool } from "./store.js";
 
 test("API sur Postgres : connexion, écriture sous verrou, lectures concurrentes", { timeout: 120_000 }, async () => {
   // Postgres réel (compilé en WebAssembly). Une seule connexion : on la prête à un client à la fois.

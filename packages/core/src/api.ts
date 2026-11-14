@@ -1,4 +1,4 @@
-import { ApiError, type ToBeService } from "./service";
+import { ApiError, type ToBeService } from "./service.js";
 
 /**
  * Table des routes de l'API. Le serveur Express et le mode démo du navigateur

@@ -1,4 +1,4 @@
-import type { Db } from "./db";
+import type { Db } from "./db.js";
 import {
   FACE_MATCH_THRESHOLD,
   PRICING,
@@ -15,7 +15,7 @@ import {
   votePackPrice,
   type BoostPlan,
   type Impact,
-} from "./rules";
+} from "./rules.js";
 import type {
   Access,
   Cagnotte,
@@ -34,7 +34,7 @@ import type {
   TobeRequest,
   User,
   Visibility,
-} from "./types";
+} from "./types.js";
 
 export class ApiError extends Error {
   constructor(

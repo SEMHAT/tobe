@@ -1,5 +1,5 @@
-import type { Db } from "./db";
-import type { Cagnotte, Contest, Contribution, Provider, TobeEvent, User } from "./types";
+import type { Db } from "./db.js";
+import type { Cagnotte, Contest, Contribution, Provider, TobeEvent, User } from "./types.js";
 
 /**
  * Données d'exemple, réservées au développement local et aux tests automatiques.

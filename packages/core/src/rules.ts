@@ -1,4 +1,4 @@
-import type { Category, ImpactTier, Reach, TobeEvent } from "./types";
+import type { Category, ImpactTier, Reach, TobeEvent } from "./types.js";
 
 // ---------- Tarifs (FCFA) — un seul endroit pour les changer ----------
 export const PRICING = {

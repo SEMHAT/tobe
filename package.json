@@ -1,6 +1,7 @@
 {
   "name": "tobe",
   "private": true,
+  "type": "module",
   "version": "1.0.0",
   "description": "ToBe — la plateforme des événements en Afrique de l'Ouest (frontend, backend, logique métier)",
   "workspaces": [

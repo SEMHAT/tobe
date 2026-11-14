@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
-import { runApi, sessionUser, type PgPool } from "./_lib/store";
+import { runApi, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 

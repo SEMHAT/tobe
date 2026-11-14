@@ -1,4 +1,4 @@
-import { COLLECTIONS, createDb, handleApi, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index";
+import { COLLECTIONS, createDb, handleApi, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
 export interface PgClient {
