@@ -3,16 +3,22 @@
   "private": true,
   "version": "1.0.0",
   "description": "ToBe — la plateforme des événements en Afrique de l'Ouest (frontend, backend, logique métier)",
-  "workspaces": ["packages/core", "server", "web"],
+  "workspaces": [
+    "packages/core",
+    "server",
+    "web"
+  ],
   "scripts": {
     "dev": "npm run dev -w server & npm run dev -w web",
     "dev:web": "npm run dev -w web",
     "dev:server": "npm run dev -w server",
     "build": "npm run build -w web",
-    "build:demo": "npm run build:demo -w web",
+    "build:demo": "npm run build:demo -w web && rm -rf dist && cp -r web/dist dist",
     "start": "npm run start -w server",
     "test": "npm run test -w packages/core && npm run test -w server",
     "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w server && npm run typecheck -w web"
   },
-  "engines": { "node": ">=22.13" }
+  "engines": {
+    "node": ">=22.13"
+  }
 }
