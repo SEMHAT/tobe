@@ -7,6 +7,6 @@ const src = path.join(path.dirname(require.resolve("@vladmandic/face-api/package
 const dst = path.resolve("public/models");
 fs.mkdirSync(dst, { recursive: true });
 for (const f of fs.readdirSync(src)) {
-  if (/^(ssd_mobilenetv1|face_landmark_68_model|face_recognition)/.test(f)) fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  if (/^(ssd_mobilenetv1|face_landmark_68_model|face_recognition|tiny_face_detector)/.test(f)) fs.copyFileSync(path.join(src, f), path.join(dst, f));
 }
 console.log("Modèles copiés dans", dst);
