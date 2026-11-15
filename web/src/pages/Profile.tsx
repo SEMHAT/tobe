@@ -1,4 +1,4 @@
-import { Bell, BriefcaseBusiness, ChevronRight, Crown, Download, LogOut, Moon, Pencil, RotateCcw, ScanFace, Sparkles, Store, Ticket } from "lucide-react";
+import { Bell, BriefcaseBusiness, ChevronRight, Crown, Download, LogOut, Moon, Pencil, RotateCcw, ScanFace, Sparkles, Store, Ticket, Trophy } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Empty, ErrorState, Field, PageLoader, Sheet, Toggle, TopBar, inputCls } from "../components/ui";
@@ -31,7 +31,7 @@ export function Profile() {
       {me ? (
         <div className="mx-5 mt-4 rounded-[24px] border border-line bg-card p-5">
           <div className="flex items-center gap-4">
-            <Avatar name={me.user.name || me.user.email} size={64} ring={me.premium} />
+            <Avatar name={me.user.name || me.user.email} src={me.user.avatar} size={64} ring={me.premium} />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 truncate font-display text-xl font-bold">
                 {me.user.name || "Sans nom"} {me.premium && <Crown className="size-5 text-brand" />}
@@ -57,11 +57,16 @@ export function Profile() {
             ))}
           </div>
           {me.premium && me.user.premiumUntil && <div className="mt-3 text-center text-xs text-brand">Pass Premium jusqu'au {longDate(me.user.premiumUntil)}</div>}
+          <Link to="/club" className="mt-4 flex items-center gap-3 rounded-2xl club-gradient px-4 py-3 text-white">
+            <Trophy className="size-5 text-[#ffd66b]" />
+            <span className="flex-1 text-sm font-semibold">ToBe Club : jouez et gagnez des récompenses</span>
+            <ChevronRight className="size-4" />
+          </Link>
         </div>
       ) : (
         <div className="mx-5 mt-4 rounded-[24px] border border-line bg-card p-6 text-center">
           <Logo className="text-2xl" />
-          <p className="mt-3 text-sm text-muted">Connectez-vous avec votre e-mail pour garder vos billets, voter et retrouver vos photos.</p>
+          <p className="mt-3 text-sm text-muted">Connectez-vous avec Google ou votre e-mail pour garder vos billets, voter, jouer au ToBe Club et retrouver vos photos.</p>
           <Button full className="mt-5" onClick={() => requireAuth()}>
             Se connecter
           </Button>

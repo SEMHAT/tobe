@@ -1,4 +1,4 @@
-import { Bell, Compass, Home, Plus, ScanFace, Search, User } from "lucide-react";
+import { Bell, Compass, Home, Plus, ScanFace, Search, Trophy, User } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useRouteRobots } from "../lib/seo";
@@ -6,9 +6,9 @@ import { SessionProvider, useSession } from "../lib/session";
 import { cx } from "./ui";
 import { Avatar, Logo, QR } from "./visual";
 
-const TABS = ["/", "/explorer", "/photos", "/profil", "/billets"];
+const TABS = ["/", "/explorer", "/photos", "/profil", "/billets", "/club"];
 /** Pages qui utilisent toute la largeur sur ordinateur ; les autres sont centrées comme un document. */
-const WIDE = ["/", "/explorer", "/organisateur", "/prestataires", "/tobe", "/photos"];
+const WIDE = ["/", "/explorer", "/organisateur", "/prestataires", "/tobe", "/photos", "/club"];
 
 function BottomNav() {
   const { me } = useSession();
@@ -54,6 +54,9 @@ function DesktopNav() {
           {link("/", "Accueil")}
           {link("/explorer", "Explorer")}
           {link("/photos", "Mes photos")}
+          <NavLink to="/club" className={({ isActive }) => cx("flex items-center gap-1.5 rounded-full px-4 py-2 text-[15px] font-semibold transition", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
+            <Trophy className="size-4 text-[#f0a000]" /> Club
+          </NavLink>
           {link("/prestataires", "Prestataires")}
           {me && link("/organisateur", "Organisateur")}
           {me?.user.role === "admin" && link("/tobe", "Agence")}
@@ -73,7 +76,7 @@ function DesktopNav() {
           </Link>
           {me ? (
             <Link to="/profil" aria-label="Mon profil">
-              <Avatar name={me.user.name || me.user.email} size={40} />
+              <Avatar name={me.user.name || me.user.email} src={me.user.avatar} size={40} />
             </Link>
           ) : (
             <button onClick={() => requireAuth()} className="h-10 rounded-full border border-line px-5 text-sm font-semibold hover:border-ink/30">
@@ -101,6 +104,7 @@ function Footer() {
             <li><Link className="hover:text-ink" to="/explorer">Tous les événements</Link></li>
             <li><Link className="hover:text-ink" to="/explorer?when=weekend">Ce week-end</Link></li>
             <li><Link className="hover:text-ink" to="/photos">Pass ToBe</Link></li>
+            <li><Link className="hover:text-ink" to="/club">ToBe Club : jouer et gagner</Link></li>
           </ul>
         </div>
         <div>

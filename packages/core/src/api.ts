@@ -1,4 +1,6 @@
-import { ApiError, type ToBeService } from "./service.js";
+import { ApiError } from "./errors.js";
+import type { GoogleProfile } from "./google.js";
+import type { ToBeService } from "./service.js";
 
 /**
  * Table des routes de l'API. Le serveur Express et le mode démo du navigateur
@@ -10,6 +12,8 @@ export interface RouteCtx {
   params: Record<string, string>;
   query: Record<string, string | undefined>;
   body: any;
+  /** Données vérifiées par le serveur avant l'appel (jamais lues dans la requête). */
+  verified: { google?: GoogleProfile };
 }
 
 type Handler = (svc: ToBeService, ctx: RouteCtx) => unknown;
@@ -33,6 +37,7 @@ export const routes: Route[] = [
   // Authentification
   { method: "POST", path: "/auth/otp", handler: (s, c) => s.requestOtp(String(c.body?.email ?? "")) },
   { method: "POST", path: "/auth/verify", handler: (s, c) => s.verifyOtp(String(c.body?.email ?? ""), String(c.body?.code ?? ""), c.body?.name) },
+  { method: "POST", path: "/auth/google", handler: (s, c) => s.loginWithGoogle(c.verified.google) },
   { method: "POST", path: "/auth/logout", handler: (s, c) => (c.token && s.logout(c.token), { ok: true }) },
 
   // Compte
@@ -41,7 +46,7 @@ export const routes: Route[] = [
   { method: "DELETE", path: "/me", handler: (s, c) => s.deleteAccount(need(c)) },
   { method: "GET", path: "/me/tickets", handler: (s, c) => s.myTickets(need(c)) },
   { method: "GET", path: "/me/photos", handler: (s, c) => s.myPhotos(need(c)) },
-  { method: "POST", path: "/me/face", handler: (s, c) => s.setFace(need(c), c.body?.descriptor) },
+  { method: "POST", path: "/me/face", handler: (s, c) => s.setFace(need(c), c.body?.descriptors ?? c.body?.descriptor) },
   { method: "DELETE", path: "/me/face", handler: (s, c) => s.clearFace(need(c)) },
   { method: "PATCH", path: "/me/pass", handler: (s, c) => s.setPass(need(c), c.body ?? {}) },
   { method: "GET", path: "/me/notifications", handler: (s, c) => s.notifications(need(c)) },
@@ -77,8 +82,23 @@ export const routes: Route[] = [
   { method: "POST", path: "/cagnottes/:id/contribute", handler: (s, c) => s.contribute(need(c), c.params.id, c.body) },
 
   // Photos
-  { method: "POST", path: "/photos/match", handler: (s, c) => s.matchSelfie(c.userId, c.body?.descriptor, c.body?.eventId) },
+  { method: "POST", path: "/photos/match", handler: (s, c) => s.matchSelfie(c.userId, c.body?.descriptors ?? c.body?.descriptor, c.body?.eventId) },
   { method: "DELETE", path: "/photos/:id", handler: (s, c) => s.removePhoto(need(c), c.params.id) },
+
+  // ToBe Club
+  { method: "GET", path: "/game", handler: (s, c) => s.game.state(c.userId) },
+  { method: "POST", path: "/game/checkin", handler: (s, c) => s.game.checkin(need(c)) },
+  { method: "POST", path: "/game/spin", handler: (s, c) => s.game.spin(need(c)) },
+  { method: "GET", path: "/game/quiz", handler: (s, c) => s.game.quiz(c.userId) },
+  { method: "POST", path: "/game/quiz", handler: (s, c) => s.game.answerQuiz(need(c), c.body?.answers) },
+  { method: "POST", path: "/game/missions/:id/claim", handler: (s, c) => s.game.claimMission(need(c), c.params.id) },
+  { method: "POST", path: "/game/referral", handler: (s, c) => s.game.referral(need(c), c.body?.code) },
+  { method: "POST", path: "/game/rewards/:id/redeem", handler: (s, c) => s.game.redeem(need(c), c.params.id) },
+  { method: "POST", path: "/events/:id/boost-credit", handler: (s, c) => s.game.useBoostCredit(need(c), c.params.id) },
+  { method: "GET", path: "/admin/game", handler: (s, c) => s.game.adminView(need(c)) },
+  { method: "POST", path: "/admin/rewards", handler: (s, c) => s.game.addReward(need(c), c.body ?? {}) },
+  { method: "PATCH", path: "/admin/rewards/:id", handler: (s, c) => s.game.updateReward(need(c), c.params.id, c.body ?? {}) },
+  { method: "PATCH", path: "/admin/redemptions/:id", handler: (s, c) => s.game.setRedemptionStatus(need(c), c.params.id, c.body?.status) },
 
   // Organisateur, prestataires, agence
   { method: "GET", path: "/organizer", handler: (s, c) => s.organizerDashboard(need(c)) },
@@ -120,13 +140,13 @@ export interface ApiResult {
 /** Exécute une requête de l'API sur un service. Ne lève jamais : renvoie un statut HTTP. */
 export function handleApi(
   svc: ToBeService,
-  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null },
+  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; verified?: { google?: GoogleProfile } },
 ): ApiResult {
   const m = matchRoute(req.method.toUpperCase(), req.path);
   if (!m) return { status: 404, body: { error: "Route inconnue" } };
   const user = svc.userFromToken(req.token ?? null);
   try {
-    const out = m.route.handler(svc, { userId: user?.id ?? null, token: req.token ?? null, params: m.params, query: req.query ?? {}, body: req.body ?? {} });
+    const out = m.route.handler(svc, { userId: user?.id ?? null, token: req.token ?? null, params: m.params, query: req.query ?? {}, body: req.body ?? {}, verified: req.verified ?? {} });
     return { status: 200, body: out ?? { ok: true } };
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: { error: e.message, ...(e.data ?? {}) } };

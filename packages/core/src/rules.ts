@@ -86,6 +86,47 @@ export function bestFaceDistance(descriptor: number[], faces: number[][]): numbe
   return best;
 }
 
+/** Écart maximal entre deux captures d'une même personne lors de l'inscription. */
+export const FACE_CONSISTENCY_MAX = 0.62;
+
+export function isDescriptor(d: unknown): d is number[] {
+  return Array.isArray(d) && d.length === 128 && d.every((x) => typeof x === "number" && Number.isFinite(x));
+}
+
+export function meanDescriptor(samples: number[][]): number[] {
+  const out = new Array<number>(128).fill(0);
+  for (const s of samples) for (let i = 0; i < 128; i++) out[i] += s[i] / samples.length;
+  return out.map((x) => Math.round(x * 1e5) / 1e5);
+}
+
+/** Empreintes enregistrées d'un utilisateur (anciennes inscriptions : une seule). */
+export function userFaces(u: { faceDescriptor: number[] | null; faceDescriptors?: number[][] | null }): number[][] {
+  if (u.faceDescriptors?.length) return u.faceDescriptors;
+  return u.faceDescriptor ? [u.faceDescriptor] : [];
+}
+
+/**
+ * Distance entre une personne (plusieurs empreintes) et les visages d'une photo.
+ * On combine la meilleure capture et la moyenne : plus robuste aux angles et à la lumière,
+ * sans multiplier les faux positifs.
+ */
+export function facesDistance(mine: number[][], faces: number[][]): number {
+  if (!mine.length || !faces.length) return Infinity;
+  if (mine.length === 1) return bestFaceDistance(mine[0], faces);
+  const mean = meanDescriptor(mine);
+  let best = Infinity;
+  for (const f of faces) {
+    let m = Infinity;
+    for (const d of mine) m = Math.min(m, faceDistance(d, f));
+    best = Math.min(best, 0.5 * m + 0.5 * faceDistance(mean, f));
+  }
+  return best;
+}
+
+export function facesMatch(mine: number[][], faces: number[][]): boolean {
+  return facesDistance(mine, faces) < FACE_MATCH_THRESHOLD;
+}
+
 // ---------- Utilitaires ----------
 export function normalizePhone(raw: string): string {
   const digits = raw.replace(/[^\d+]/g, "");

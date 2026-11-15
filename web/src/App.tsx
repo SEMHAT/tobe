@@ -15,6 +15,7 @@ import { Organizer, OrganizerEvent, Scanner } from "./pages/Organizer";
 import { Providers } from "./pages/Providers";
 import { TobeAdmin } from "./pages/Admin";
 import { NotFound } from "./pages/NotFound";
+import { Club } from "./pages/Club";
 import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
@@ -48,6 +49,7 @@ export function App() {
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/prestataires" element={<Providers />} />
           <Route path="/tobe" element={<TobeAdmin />} />
+          <Route path="/club" element={<Club />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

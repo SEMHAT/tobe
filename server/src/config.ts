@@ -10,6 +10,7 @@ export const config = {
   webDir: process.env.WEB_DIR ? path.resolve(process.env.WEB_DIR) : path.resolve(import.meta.dirname, "../../web/dist"),
   corsOrigins: list(process.env.CORS_ORIGINS ?? "http://localhost:5173,https://tobe.eledji.com"),
   adminEmails: list(process.env.ADMIN_EMAILS),
+  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   paymentsEnabled: process.env.PAYMENTS_ENABLED === "true",
   /** En production, laisser à false : le code n'est envoyé que par e-mail. */
   exposeOtp: process.env.EXPOSE_OTP === "true" || process.env.NODE_ENV !== "production",

@@ -1,5 +1,5 @@
 import type { ContestView, EventCard } from "@tobe/core";
-import { ArrowRight, Bell, CalendarPlus, ChevronRight, Crown, MapPin, QrCode, ScanFace, Search, ShieldCheck, Sparkles, Store, Ticket } from "lucide-react";
+import { ArrowRight, Bell, Brain, CalendarPlus, ChevronRight, Crown, Flame, Gift, MapPin, QrCode, ScanFace, Search, ShieldCheck, Sparkles, Store, Ticket, Trophy } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { HeroCard, RowCard, SkeletonRows, TileCard } from "../components/events";
@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { CATEGORY_LABELS, compact, countdown } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
+import { Wheel, type GameState } from "./Club";
 
 interface HomeData {
   featured: EventCard[];
@@ -47,9 +48,7 @@ function MobileHome({ data, error, loading, reload }: { data: HomeData | null; e
       <header className="flex items-center justify-between px-5 pt-4">
         <Logo height={30} />
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 rounded-full border border-line bg-card px-3 py-1.5 text-[13px] font-semibold">
-            <MapPin className="size-3.5 text-brand" /> Lomé
-          </span>
+          <ClubChip />
           <Link to={me ? "/notifications" : "/profil"} aria-label="Notifications" className="relative grid size-10 place-items-center rounded-full border border-line bg-card">
             <Bell className="size-5" />
             {!!me?.unread && <span className="absolute right-2 top-2 size-2.5 rounded-full border-2 border-[var(--card)] bg-coral" />}
@@ -120,6 +119,10 @@ function MobileHome({ data, error, loading, reload }: { data: HomeData | null; e
       )}
 
       <div className="mx-5 mt-7">
+        <ClubCard />
+      </div>
+
+      <div className="mx-5 mt-4">
         <PassCard />
       </div>
 
@@ -146,6 +149,99 @@ function MobileHome({ data, error, loading, reload }: { data: HomeData | null; e
         </Link>
       </div>
     </div>
+  );
+}
+
+function useGame() {
+  const { me } = useSession();
+  return useLoad(() => api<GameState>("GET", "/game"), [me?.user.id]).data;
+}
+
+function ClubChip() {
+  const g = useGame();
+  const p = g?.me;
+  return (
+    <Link to="/club" className="flex h-10 items-center gap-1.5 rounded-full gold-gradient px-3.5 text-[13px] font-bold text-[#4a2c00] shadow-[0_6px_18px_-8px_rgba(240,138,0,0.8)]">
+      <Trophy className="size-4" />
+      {p ? `${p.points} pts` : "Jouer"}
+    </Link>
+  );
+}
+
+function ClubCard() {
+  const g = useGame();
+  const p = g?.me;
+  const todo = p ? [!p.dailyDone, !p.spinDone, !p.quizDone].filter(Boolean).length : 3;
+  return (
+    <Link to="/club" className="relative block overflow-hidden rounded-[26px] club-gradient p-5 text-white">
+      <div className="pointer-events-none absolute -right-14 -top-14 size-44 opacity-90">
+        <Wheel values={g?.wheel ?? [10, 25, 5, 50, 15, 100, 20, 30]} rotation={0} spinning={false} idle />
+      </div>
+      <div className="relative max-w-[62%]">
+        <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider">
+          <Trophy className="size-3.5 text-[#ffd66b]" /> ToBe Club
+        </div>
+        <div className="mt-3 font-display text-[22px] font-extrabold leading-tight">{p ? (todo ? `${todo} jeu${todo > 1 ? "x" : ""} vous attend${todo > 1 ? "ent" : ""}` : "Tout est joué, bravo !") : "Jouez, gagnez, sortez"}</div>
+        <p className="mt-1 text-sm text-white/75">{p ? (todo ? "Roue, quiz et bonus du jour : des points à prendre." : "Revenez demain pour garder votre série.") : "Roue du jour, quiz sur Lomé et missions : des points contre des récompenses."}</p>
+      </div>
+      <div className="relative mt-4 flex items-center gap-2">
+        {p && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1.5 text-sm font-bold">
+            <Flame className="size-4 text-[#ffb21e]" /> {p.streak}
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1 rounded-full bg-white px-4 py-1.5 text-sm font-bold text-brand">
+          {p ? "Jouer" : "Découvrir"} <ChevronRight className="size-4" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function DesktopClub() {
+  const g = useGame();
+  const p = g?.me;
+  return (
+    <section className="mx-auto max-w-[1240px] px-8 pt-24">
+      <div className="relative grid grid-cols-[1.1fr_1fr] items-center gap-10 overflow-hidden rounded-[36px] club-gradient p-12 text-white">
+        <div className="relative">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1.5 text-xs font-bold uppercase tracking-widest">
+            <Trophy className="size-4 text-[#ffd66b]" /> Nouveau · ToBe Club
+          </div>
+          <h2 className="mt-5 text-[52px] font-black leading-[0.98]">
+            Jouez chaque jour.
+            <br />
+            <span className="text-[#ffd66b]">Gagnez vos sorties.</span>
+          </h2>
+          <p className="mt-5 max-w-lg text-lg text-white/75">Une roue, un quiz sur Lomé et des missions : vos points se transforment en boosts pour vos événements, en mois Premium et en lots offerts par ToBe.</p>
+          <div className="mt-7 grid max-w-lg grid-cols-3 gap-3">
+            {[
+              [Gift, "Bonus du jour", "jusqu'à 50 pts"],
+              [Sparkles, "Roue", "jusqu'à 100 pts"],
+              [Brain, "Quiz", "3 questions"],
+            ].map(([Icon, t, d]) => {
+              const I = Icon as typeof Gift;
+              return (
+                <div key={t as string} className="rounded-2xl bg-white/10 p-3.5 backdrop-blur">
+                  <I className="size-5 text-[#ffd66b]" />
+                  <div className="mt-2 text-sm font-bold">{t as string}</div>
+                  <div className="text-xs text-white/65">{d as string}</div>
+                </div>
+              );
+            })}
+          </div>
+          <Link to="/club" className="mt-8 inline-flex h-14 items-center gap-2 rounded-full bg-white px-8 text-lg font-bold text-brand transition hover:scale-[1.02]">
+            {p ? `Jouer · ${p.points} points` : "Jouer maintenant"} <ArrowRight className="size-5" />
+          </Link>
+        </div>
+        <div className="relative mx-auto w-full max-w-[400px]">
+          <div className="absolute inset-[-30px] rounded-full bg-[#ffb21e]/25 blur-3xl" />
+          <div className="relative">
+            <Wheel values={g?.wheel ?? [10, 25, 5, 50, 15, 100, 20, 30]} rotation={0} spinning={false} idle />
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -323,6 +419,8 @@ function DesktopHome({ data, loading }: { data: HomeData | null; loading: boolea
           </div>
         )}
       </section>
+
+      <DesktopClub />
 
       {/* Ce que fait ToBe */}
       <section className="mx-auto max-w-[1240px] px-8 pt-24">

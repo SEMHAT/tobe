@@ -171,6 +171,9 @@ export function OrganizerEvent() {
   const [photosOpen, setPhotosOpen] = useState(false);
   const [liveOpen, setLiveOpen] = useState(false);
   const r = dash?.events.find((x) => x.event.id === id || x.event.slug === id);
+  const { data: game, reload: reloadGame } = useLoad(async () => (me ? api<{ me: { boostCredits: number } | null }>("GET", "/game") : null), [me?.user.id]);
+  const credits = game?.me?.boostCredits ?? 0;
+  const [usingCredit, setUsingCredit] = useState(false);
 
   if (error) return (<><TopBar title="Gérer" /><ErrorState message={error.message} /></>);
   if (!ev || !dash) return <PageLoader />;
@@ -223,6 +226,26 @@ export function OrganizerEvent() {
         <div className="grid grid-cols-2 gap-3">
           <Action icon={<ScanLine />} label="Scanner les billets" onClick={() => nav(`/scanner?event=${ev.id}`)} />
           <Action icon={<ImagePlus />} label="Déposer les photos" sub={`${r.photos} en ligne`} onClick={() => setPhotosOpen(true)} />
+          {credits > 0 && (
+            <Action
+              icon={<Rocket />}
+              label={usingCredit ? "Activation…" : "Boost offert"}
+              sub={`${credits} crédit${credits > 1 ? "s" : ""} du Club · 3 jours`}
+              onClick={async () => {
+                if (usingCredit) return;
+                setUsingCredit(true);
+                try {
+                  const b = await api<{ boostedUntil: string }>("POST", `/events/${ev.id}/boost-credit`);
+                  setEv({ ...ev, boostedUntil: b.boostedUntil });
+                  toast("Boost offert activé : 3 jours en tête des listes");
+                  reloadGame();
+                } catch (e) {
+                  toast((e as Error).message, "error");
+                }
+                setUsingCredit(false);
+              }}
+            />
+          )}
           {payments && <Action icon={<Rocket />} label="Booster" sub={ev.boostedUntil && new Date(ev.boostedUntil) > new Date() ? "Boost actif" : "Passer en tête"} onClick={() => setBoostOpen(true)} />}
           <Action icon={<Share2 />} label="Partager" sub="WhatsApp" onClick={() => window.open(whatsappLink(`${ev.title} — ${shortDate(ev.startsAt)}, ${ev.venue}. Sur ToBe : ${url}`), "_blank")} />
           <Action icon={<Radio />} label="Direct vidéo" sub={ev.liveUrl ? "Lien ajouté" : "Ajouter le lien"} onClick={() => setLiveOpen(true)} />

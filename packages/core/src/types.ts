@@ -29,7 +29,11 @@ export interface User {
   role: "user" | "admin";
   passEnabled: boolean;
   faceDescriptor: number[] | null;
+  /** Plusieurs empreintes du même visage (face, profil gauche, profil droit) : reconnaissance plus fiable. */
+  faceDescriptors?: number[][] | null;
   neverShow: boolean;
+  avatar?: string | null;
+  googleId?: string | null;
   premiumUntil: string | null;
   pro: boolean;
 }
@@ -246,5 +250,62 @@ export interface Notification {
   body: string;
   link: string;
   read: boolean;
+  createdAt: string;
+}
+
+// ---------- ToBe Club (jeu, points et récompenses) ----------
+export interface Player {
+  id: string; // identifiant de l'utilisateur
+  points: number; // solde disponible
+  earned: number; // total gagné depuis le début (détermine le niveau)
+  streak: number;
+  bestStreak: number;
+  lastDay: string | null; // dernier bonus du jour (AAAA-MM-JJ)
+  spinDay: string | null;
+  quizDay: string | null;
+  quizResult: { score: number; total: number; points: number } | null;
+  missions: Record<string, string>; // mission -> date de validation
+  attended: string[]; // événements dont la présence a déjà rapporté des points
+  refCode: string;
+  referredBy: string | null;
+  referrals: number;
+  boostCredits: number;
+  badges: string[];
+}
+
+export interface LedgerEntry {
+  id: string;
+  userId: string;
+  amount: number;
+  reason: string;
+  label: string;
+  month: string; // AAAA-MM
+  createdAt: string;
+}
+
+export type RewardKind = "boost" | "premium" | "badge" | "lot";
+
+export interface Reward {
+  id: string;
+  title: string;
+  description: string;
+  cost: number;
+  kind: RewardKind;
+  stock: number | null; // null = illimité
+  active: boolean;
+  createdAt: string;
+}
+
+export interface Redemption {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  rewardId: string;
+  title: string;
+  kind: RewardKind;
+  cost: number;
+  code: string;
+  status: "livre" | "a-remettre" | "remis";
   createdAt: string;
 }

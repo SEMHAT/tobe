@@ -15,7 +15,9 @@ Le même code métier tourne côté serveur et, en **mode démo**, directement d
 
 ## Fonctionnalités
 
-- **Connexion par e-mail** : code à 6 chiffres envoyé par Resend, sans mot de passe.
+- **Connexion avec Google** ou **par e-mail** (code à 6 chiffres envoyé par Resend), sans mot de passe.
+- **ToBe Club** : bonus du jour avec série, roue du jour, quiz quotidien sur Lomé et le Togo, missions, parrainage, niveaux, classement du mois et récompenses (boost, Premium, badge, lots ajoutés par l'agence). Tous les tirages et réponses sont vérifiés côté serveur.
+- **Pass ToBe guidé** : caméra en direct qui vérifie cadrage, lumière et netteté, puis capture 3 angles (face et profils) ; le mouvement de tête écarte les photos de photos.
 - **Accueil** : à la une (événements boostés), ce week-end, votes en cours, les plus marquants.
 - **Explorer** : recherche, catégories, dates, gratuit/payant, tri par date ou par impact, **carte** OpenStreetMap.
 - **Classement par impact** : score sur 100 (taille, portée, type, engagement réel) → badges Local, Ville, Majeur, Phare.
@@ -51,6 +53,7 @@ Variables d'environnement :
 | `DATABASE_URL` | Postgres Neon (ajoutée par l'intégration Neon) |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob pour les affiches et photos |
 | `RESEND_API_KEY`, `RESEND_EMAIL_DOMAIN` | Envoi des codes de connexion (expéditeur `connexion@eledji.com`, ou `EMAIL_FROM`) |
+| `GOOGLE_CLIENT_ID` | Facultatif : client OAuth Google (par défaut, celui de ToBe dans le projet Google Cloud ELEDJI) |
 | `ADMIN_EMAILS` | E-mails ayant accès à l'espace agence ToBe (séparés par des virgules) |
 | `PAYMENTS_ENABLED` | `true` uniquement quand le paiement Mobile Money est branché |
 

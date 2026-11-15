@@ -1,8 +1,16 @@
 import type { Db } from "./db.js";
+import { Game } from "./game.js";
+import type { GoogleProfile } from "./google.js";
 import {
+  FACE_CONSISTENCY_MAX,
   FACE_MATCH_THRESHOLD,
   PRICING,
-  bestFaceDistance,
+  faceDistance,
+  facesDistance,
+  facesMatch,
+  isDescriptor,
+  meanDescriptor,
+  userFaces,
   computeImpact,
   fingerprint,
   newId,
@@ -36,15 +44,8 @@ import type {
   Visibility,
 } from "./types.js";
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public data?: Record<string, unknown>,
-  ) {
-    super(message);
-  }
-}
+import { ApiError } from "./errors.js";
+export { ApiError };
 
 export interface ServiceOptions {
   now?: () => Date;
@@ -56,6 +57,8 @@ export interface ServiceOptions {
   demo?: boolean;
   /** Paiements en ligne actifs (agrégateur Mobile Money branché). Sinon : réservation et paiement à l'entrée. */
   paymentsEnabled?: boolean;
+  /** Identifiant client OAuth Google (connexion avec Google). */
+  googleClientId?: string | null;
   /** Envoi du code de connexion par e-mail. */
   sendCode?: (email: string, code: string) => Promise<void> | void;
 }
@@ -149,7 +152,9 @@ export interface CreateEventInput {
 const DAY = 86_400_000;
 
 export class ToBeService {
-  private opts: Required<Omit<ServiceOptions, "sendCode">> & Pick<ServiceOptions, "sendCode">;
+  private opts: Required<Omit<ServiceOptions, "sendCode" | "googleClientId">> & Pick<ServiceOptions, "sendCode" | "googleClientId">;
+  /** ToBe Club : jeu, points et récompenses. */
+  readonly game: Game;
   /** Tâches asynchrones à attendre avant de répondre (envoi d'e-mails). */
   pending: Promise<unknown>[] = [];
 
@@ -164,13 +169,18 @@ export class ToBeService {
       demo: options.demo ?? false,
       paymentsEnabled: options.paymentsEnabled ?? false,
       sendCode: options.sendCode,
+      googleClientId: options.googleClientId ?? null,
     };
+    this.game = new Game(this);
   }
 
-  private now(): Date {
+  now(): Date {
     return this.opts.now();
   }
-  private iso(): string {
+  get isDemo() {
+    return this.opts.demo;
+  }
+  iso(): string {
     return this.now().toISOString();
   }
 
@@ -178,7 +188,7 @@ export class ToBeService {
   // Authentification par code envoyé par e-mail
   // =====================================================================
   config() {
-    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo };
+    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo, googleClientId: this.opts.googleClientId || null };
   }
 
   requestOtp(rawEmail: string): { sent: true; email: string; devCode?: string } {
@@ -205,6 +215,17 @@ export class ToBeService {
       throw new ApiError(400, "Code incorrect");
     }
     this.db.otps.remove(email);
+    return this.signIn(email, { name });
+  }
+
+  /** Connexion avec Google : le profil a déjà été vérifié auprès de Google (voir google.ts). */
+  loginWithGoogle(profile: GoogleProfile | undefined) {
+    if (!profile) throw new ApiError(400, "Connexion Google invalide");
+    if (!this.opts.googleClientId) throw new ApiError(400, "Connexion Google non disponible");
+    return this.signIn(normalizeEmail(profile.email), { name: profile.name, avatar: profile.picture, googleId: profile.sub });
+  }
+
+  private signIn(email: string, extra: { name?: string; avatar?: string | null; googleId?: string }): { token: string; user: User; isNew: boolean } {
     let user = this.db.users.find((u) => u.email === email);
     const isNew = !user;
     const isAdmin = this.opts.demo || this.opts.adminEmails.includes(email);
@@ -213,18 +234,26 @@ export class ToBeService {
         id: newId("usr"),
         email,
         phone: null,
-        name: name?.trim() || "",
+        name: extra.name?.trim().slice(0, 60) || "",
         createdAt: this.iso(),
         role: isAdmin ? "admin" : "user",
         passEnabled: false,
         faceDescriptor: null,
+        faceDescriptors: null,
         neverShow: false,
         premiumUntil: null,
         pro: false,
+        avatar: extra.avatar ?? null,
+        googleId: extra.googleId ?? null,
       });
       if (this.opts.demo) this.giveDemoEvents(user);
-    } else if (isAdmin && user.role !== "admin") {
-      user = this.db.users.update(user.id, { role: "admin" });
+    } else {
+      const patch: Partial<User> = {};
+      if (isAdmin && user.role !== "admin") patch.role = "admin";
+      if (extra.googleId && !user.googleId) patch.googleId = extra.googleId;
+      if (extra.avatar && !user.avatar) patch.avatar = extra.avatar;
+      if (!user.name && extra.name?.trim()) patch.name = extra.name.trim().slice(0, 60);
+      if (Object.keys(patch).length) user = this.db.users.update(user.id, patch);
     }
     const token = randomToken();
     this.db.sessions.insert({ id: token, userId: user.id, createdAt: this.iso() });
@@ -248,7 +277,7 @@ export class ToBeService {
     if (this.db.sessions.get(token)) this.db.sessions.remove(token);
   }
 
-  private requireUser(userId: string | null | undefined): User {
+  requireUser(userId: string | null | undefined): User {
     const u = userId ? this.db.users.get(userId) : undefined;
     if (!u) throw new ApiError(401, "Connectez-vous pour continuer");
     return u;
@@ -259,7 +288,7 @@ export class ToBeService {
     const orders = this.db.orders.filter((o) => o.userId === u.id && (o.status === "paid" || o.status === "reserved"));
     const votes = this.db.votes.filter((v) => v.userId === u.id).reduce((s, v) => s + v.count, 0);
     const events = new Set(orders.map((o) => o.eventId));
-    const photos = u.faceDescriptor && u.passEnabled ? this.myPhotos(u.id).reduce((s, g) => s + g.photos.length, 0) : 0;
+    const photos = userFaces(u).length && u.passEnabled ? this.myPhotos(u.id).reduce((s, g) => s + g.photos.length, 0) : 0;
     const unread = this.db.notifications.filter((n) => n.userId === u.id && !n.read).length;
     return {
       user: this.publicUser(u),
@@ -270,8 +299,8 @@ export class ToBeService {
   }
 
   publicUser(u: User) {
-    const { faceDescriptor, ...rest } = u;
-    return { ...rest, hasFace: !!faceDescriptor };
+    const { faceDescriptor, faceDescriptors, googleId, ...rest } = u;
+    return { ...rest, hasFace: !!faceDescriptor || !!faceDescriptors?.length, google: !!googleId };
   }
 
   updateMe(userId: string, patch: { name?: string; phone?: string | null }) {
@@ -291,7 +320,7 @@ export class ToBeService {
   deleteAccount(userId: string) {
     const u = this.requireUser(userId);
     for (const s of this.db.sessions.filter((s) => s.userId === u.id)) this.db.sessions.remove(s.id);
-    this.db.users.update(u.id, { name: "Compte supprimé", faceDescriptor: null, passEnabled: false, phone: null, email: `supprime-${u.id}@tobe.invalid` });
+    this.db.users.update(u.id, { name: "Compte supprimé", faceDescriptor: null, faceDescriptors: null, avatar: null, googleId: null, passEnabled: false, phone: null, email: `supprime-${u.id}@tobe.invalid` });
     return { ok: true };
   }
 
@@ -832,10 +861,10 @@ export class ToBeService {
     const e = this.findEvent(idOrSlug);
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
     if (!this.canView(e, user, code)) throw new ApiError(403, "Galerie réservée aux invités");
-    const hidden = new Set(this.db.users.filter((u) => u.neverShow && !!u.faceDescriptor).map((u) => u.faceDescriptor!));
+    const hidden = this.db.users.filter((u) => u.neverShow && userFaces(u).length > 0).map((u) => userFaces(u));
     return this.db.photos
       .filter((p) => p.eventId === e.id)
-      .filter((p) => ![...hidden].some((d) => bestFaceDistance(d, p.faces) < FACE_MATCH_THRESHOLD))
+      .filter((p) => !hidden.some((mine) => facesMatch(mine, p.faces)))
       .map(({ faces, ...p }) => ({ ...p, faceCount: faces.length }))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
@@ -850,11 +879,12 @@ export class ToBeService {
     if (!e.options.gallery) this.db.events.update(e.id, { options: { ...e.options, gallery: true } });
     // Pass ToBe : on prévient automatiquement chaque personne reconnue.
     const notified: string[] = [];
-    for (const u of this.db.users.filter((u) => u.passEnabled && !!u.faceDescriptor && !u.neverShow)) {
+    for (const u of this.db.users.filter((u) => u.passEnabled && userFaces(u).length > 0 && !u.neverShow)) {
       if (!this.canView(e, u)) continue;
-      const n = added.filter((p) => bestFaceDistance(u.faceDescriptor!, p.faces) < FACE_MATCH_THRESHOLD).length;
+      const mine = userFaces(u);
+      const n = added.filter((p) => facesMatch(mine, p.faces)).length;
       if (n > 0) {
-        const total = this.db.photos.filter((p) => p.eventId === e.id && bestFaceDistance(u.faceDescriptor!, p.faces) < FACE_MATCH_THRESHOLD).length;
+        const total = this.db.photos.filter((p) => p.eventId === e.id && facesMatch(mine, p.faces)).length;
         this.notify(u.id, `Vous êtes sur ${total} photo${total > 1 ? "s" : ""} de ${e.title}`, "Retrouvez-les dans Mes photos et téléchargez-les en HD.", `/photos?event=${e.id}`);
         notified.push(u.id);
       }
@@ -867,17 +897,25 @@ export class ToBeService {
     const p = this.db.photos.get(photoId);
     if (!p) throw new ApiError(404, "Photo introuvable");
     const e = this.db.events.get(p.eventId);
-    const isMe = !!user.faceDescriptor && bestFaceDistance(user.faceDescriptor, p.faces) < FACE_MATCH_THRESHOLD;
+    const isMe = facesMatch(userFaces(user), p.faces);
     if (!(e && this.canManage(e, user)) && !isMe) throw new ApiError(403, "Vous ne pouvez retirer que vos propres photos");
     this.db.photos.remove(p.id);
     return { ok: true };
   }
 
-  setFace(userId: string, descriptor: number[]) {
+  /**
+   * Inscription du visage. L'application envoie plusieurs captures (face, gauche, droite) :
+   * on vérifie qu'elles montrent bien la même personne, puis on garde toutes les empreintes.
+   */
+  setFace(userId: string, input: number[] | number[][]) {
     const user = this.requireUser(userId);
-    if (!Array.isArray(descriptor) || descriptor.length !== 128 || descriptor.some((x) => typeof x !== "number" || !Number.isFinite(x)))
-      throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
-    const u = this.db.users.update(user.id, { faceDescriptor: descriptor, passEnabled: true, neverShow: false });
+    const samples = (Array.isArray(input?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
+    if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
+    for (let i = 0; i < samples.length; i++)
+      for (let j = i + 1; j < samples.length; j++)
+        if (faceDistance(samples[i], samples[j]) > FACE_CONSISTENCY_MAX)
+          throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez, seul face à la caméra.");
+    const u = this.db.users.update(user.id, { faceDescriptor: meanDescriptor(samples), faceDescriptors: samples, passEnabled: true, neverShow: false });
     return { user: this.publicUser(u), groups: this.myPhotos(u.id) };
   }
 
@@ -889,27 +927,29 @@ export class ToBeService {
 
   clearFace(userId: string) {
     const user = this.requireUser(userId);
-    return this.publicUser(this.db.users.update(user.id, { faceDescriptor: null, passEnabled: false }));
+    return this.publicUser(this.db.users.update(user.id, { faceDescriptor: null, faceDescriptors: null, passEnabled: false }));
   }
 
   myPhotos(userId: string) {
     const user = this.requireUser(userId);
-    if (!user.faceDescriptor) return [];
-    return this.matchPhotos(user.faceDescriptor, user);
+    const mine = userFaces(user);
+    if (!mine.length) return [];
+    return this.matchPhotos(mine, user);
   }
 
   /** Recherche ponctuelle par selfie, sans enregistrer le visage. */
-  matchSelfie(userId: string | null, descriptor: number[], eventId?: string) {
+  matchSelfie(userId: string | null, input: number[] | number[][], eventId?: string) {
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
-    if (!Array.isArray(descriptor) || descriptor.length !== 128) throw new ApiError(400, "Visage non reconnu");
-    return this.matchPhotos(descriptor, user, eventId);
+    const samples = (Array.isArray(input?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
+    if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu");
+    return this.matchPhotos(samples, user, eventId);
   }
 
-  private matchPhotos(descriptor: number[], user: User | null, eventId?: string) {
+  private matchPhotos(mine: number[][], user: User | null, eventId?: string) {
     const groups = new Map<string, { event: EventCard; photos: (Omit<Photo, "faces"> & { distance: number })[] }>();
     for (const p of this.db.photos.all()) {
       if (eventId && p.eventId !== eventId) continue;
-      const d = bestFaceDistance(descriptor, p.faces);
+      const d = facesDistance(mine, p.faces);
       if (d >= FACE_MATCH_THRESHOLD) continue;
       const e = this.db.events.get(p.eventId);
       if (!e || !this.canView(e, user)) continue;

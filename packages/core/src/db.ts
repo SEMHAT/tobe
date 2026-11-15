@@ -3,8 +3,12 @@ import type {
   Contest,
   Contribution,
   Notification,
+  LedgerEntry,
   Order,
   Otp,
+  Player,
+  Redemption,
+  Reward,
   Payment,
   Photo,
   Provider,
@@ -95,6 +99,10 @@ export const COLLECTIONS = [
   "tobeRequests",
   "payments",
   "notifications",
+  "players",
+  "ledger",
+  "rewards",
+  "redemptions",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
@@ -115,6 +123,10 @@ export interface Db {
   tobeRequests: Collection<TobeRequest>;
   payments: Collection<Payment>;
   notifications: Collection<Notification>;
+  players: Collection<Player>;
+  ledger: Collection<LedgerEntry>;
+  rewards: Collection<Reward>;
+  redemptions: Collection<Redemption>;
 }
 
 export type DbSnapshot = { [K in CollectionName]?: { id: string }[] };

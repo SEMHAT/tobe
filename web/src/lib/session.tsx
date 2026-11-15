@@ -15,6 +15,8 @@ export interface Me {
     hasFace: boolean;
     premiumUntil: string | null;
     pro: boolean;
+    avatar?: string | null;
+    google?: boolean;
   };
   stats: { events: number; tickets: number; votes: number; photos: number; organized: number };
   unread: number;
@@ -32,6 +34,8 @@ interface Ctx {
   setTheme: (t: "dark" | "light") => void;
   /** Paiement en ligne actif (sinon : réservation, paiement à l'entrée). */
   payments: boolean;
+  /** Identifiant client Google (bouton « Continuer avec Google »), null si indisponible. */
+  googleClientId: string | null;
 }
 
 const SessionCtx = createContext<Ctx>(null!);
@@ -45,9 +49,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: "ok" | "error" }[]>([]);
   const [theme, setThemeState] = useState<"dark" | "light">(() => (localStorage.getItem("tobe-theme") as "dark" | "light") || "light");
   const [payments, setPayments] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   useEffect(() => {
-    api<{ paymentsEnabled: boolean }>("GET", "/config")
-      .then((c) => setPayments(c.paymentsEnabled))
+    api<{ paymentsEnabled: boolean; googleClientId?: string | null }>("GET", "/config")
+      .then((c) => {
+        setPayments(c.paymentsEnabled);
+        setGoogleClientId(c.googleClientId ?? null);
+      })
       .catch(() => {});
   }, []);
 
@@ -59,6 +67,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     try {
       setMe(await api<Me>("GET", "/me"));
+      // Parrainage : lien partagé par un ami (?ref=CODE), appliqué une seule fois après la connexion.
+      const ref = localStorage.getItem("tobe-ref");
+      if (ref) {
+        localStorage.removeItem("tobe-ref");
+        api<{ points: number }>("POST", "/game/referral", { code: ref })
+          .then((r) => window.dispatchEvent(new CustomEvent("tobe-toast", { detail: `+${r.points} points de bienvenue grâce à votre parrain !` })))
+          .catch(() => {});
+      }
     } catch {
       setMe(null);
     }
@@ -74,6 +90,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setToasts((t) => [...t, { id, msg, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
+  useEffect(() => {
+    const h = (e: Event) => toast((e as CustomEvent<string>).detail);
+    window.addEventListener("tobe-toast", h);
+    return () => window.removeEventListener("tobe-toast", h);
+  }, [toast]);
 
   const requireAuth = useCallback(
     (reason?: string) => {
@@ -106,11 +127,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme, payments }}>
+    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme, payments, googleClientId }}>
       {children}
       <AuthSheet
         open={!!auth}
         reason={auth?.reason}
+        googleClientId={googleClientId}
         onClose={() => finishAuth(false)}
         onDone={async () => {
           await refresh();
@@ -129,7 +151,60 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: string; onClose: () => void; onDone: () => void }) {
+// ---------- Connexion avec Google (Google Identity Services) ----------
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize(o: Record<string, unknown>): void;
+          renderButton(el: HTMLElement, o: Record<string, unknown>): void;
+          cancel(): void;
+        };
+      };
+    };
+  }
+}
+let gsi: Promise<void> | null = null;
+function loadGsi() {
+  gsi ??= new Promise<void>((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = () => res();
+    s.onerror = () => {
+      gsi = null;
+      rej(new Error("Google indisponible"));
+    };
+    document.head.appendChild(s);
+  });
+  return gsi;
+}
+
+function GoogleButton({ clientId, onCredential }: { clientId: string; onCredential: (credential: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const cb = useRef(onCredential);
+  cb.current = onCredential;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    loadGsi()
+      .then(() => {
+        if (!alive || !box.current || !window.google) return;
+        window.google.accounts.id.initialize({ client_id: clientId, callback: (r: { credential: string }) => cb.current(r.credential), ux_mode: "popup", auto_select: false, itp_support: true, context: "signin" });
+        const width = Math.min(400, Math.max(220, Math.floor(box.current.getBoundingClientRect().width)));
+        window.google.accounts.id.renderButton(box.current, { type: "standard", theme: "outline", size: "large", shape: "pill", text: "continue_with", logo_alignment: "center", width, locale: "fr" });
+      })
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [clientId]);
+  if (failed) return null;
+  return <div ref={box} className="flex min-h-[44px] w-full justify-center [&_iframe]:!mx-auto" />;
+}
+
+function AuthSheet({ open, reason, googleClientId, onClose, onDone }: { open: boolean; reason?: string; googleClientId: string | null; onClose: () => void; onDone: () => void }) {
   const [step, setStep] = useState<"email" | "code" | "name">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -173,6 +248,20 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
     setBusy(false);
   };
 
+  const google = async (credential: string) => {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await api<{ token: string; user: { name: string } }>("POST", "/auth/google", { credential });
+      setToken(r.token);
+      if (!r.user.name) setStep("name");
+      else onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+    setBusy(false);
+  };
+
   const saveName = async () => {
     setBusy(true);
     try {
@@ -194,9 +283,17 @@ function AuthSheet({ open, reason, onClose, onDone }: { open: boolean; reason?: 
           }}
           className="space-y-4"
         >
-          <p className="text-sm text-muted">{reason ?? "Pas de mot de passe : on vous envoie un code par e-mail."}</p>
+          <p className="text-sm text-muted">{reason ?? "Rejoignez ToBe en quelques secondes, sans mot de passe."}</p>
+          {googleClientId && (
+            <>
+              <GoogleButton clientId={googleClientId} onCredential={google} />
+              <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                <span className="h-px flex-1 bg-line" /> ou avec votre e-mail <span className="h-px flex-1 bg-line" />
+              </div>
+            </>
+          )}
           <Field label="Adresse e-mail">
-            <input autoFocus type="email" inputMode="email" autoComplete="email" placeholder="vous@exemple.com" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} />
+            <input autoFocus={!googleClientId} type="email" inputMode="email" autoComplete="email" placeholder="vous@exemple.com" className={inputCls} value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           {err && <p className="text-sm text-coral">{err}</p>}
           <Button full type="submit" loading={busy} disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())} icon={<Mail className="size-4" />}>

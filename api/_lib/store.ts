@@ -1,4 +1,4 @@
-import { COLLECTIONS, createDb, handleApi, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index.js";
+import { COLLECTIONS, createDb, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
 export interface PgClient {
@@ -32,6 +32,7 @@ export function serviceOptions(env: Record<string, string | undefined>) {
     adminEmails: list(env.ADMIN_EMAILS),
     paymentsEnabled: env.PAYMENTS_ENABLED === "true",
     exposeOtp: env.EXPOSE_OTP === "true",
+    googleClientId: env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID,
     sendCode: (email: string, code: string) => sendLoginCode(email, code, env),
   };
 }
@@ -48,6 +49,10 @@ export async function runApi(
   req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null },
 ): Promise<ApiResult> {
   await ensureSchema(pool);
+  // Vérifications externes (Google) avant d'ouvrir la transaction.
+  const pre = await preVerify(req, env);
+  if (pre.error) return pre.error;
+  const full = { ...req, verified: pre.verified };
   const attempt = async (lock: boolean): Promise<ApiResult | null> => {
     const client = await pool.connect();
     try {
@@ -70,7 +75,7 @@ export async function runApi(
         },
       });
       const svc = new ToBeService(db, serviceOptions(env));
-      const result = handleApi(svc, req);
+      const result = handleApi(svc, full);
       if (!dirty.size && !removed.size) {
         await client.query("COMMIT");
         await Promise.all(svc.pending);

@@ -3,13 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import cors from "cors";
 import express, { type Request } from "express";
-import { handleApi, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
+import { handleApi, preVerify, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
 import { config } from "./config";
 
 export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   const cfg = { ...config, ...opts };
   if (cfg.seed) seedDb(db);
-  const svc = new ToBeService(db, { exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
+  const svc = new ToBeService(db, { exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
 
   const app = express();
   app.disable("x-powered-by");
@@ -47,13 +47,16 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   app.use("/uploads", express.static(cfg.uploadDir, { maxAge: "30d", immutable: true }));
 
   // Toute l'API passe par la même table de routes que le mode démo.
-  app.use("/api", (req, res) => {
+  app.use("/api", async (req, res) => {
+    const pre = await preVerify({ method: req.method, path: req.path, body: req.body }, { GOOGLE_CLIENT_ID: cfg.googleClientId });
+    if (pre.error) return void res.status(pre.error.status).json(pre.error.body);
     const r = handleApi(svc, {
       method: req.method,
       path: req.path,
       query: req.query as Record<string, string>,
       body: req.body,
       token: token(req),
+      verified: pre.verified,
     });
     const pending = svc.pending.splice(0);
     Promise.all(pending).finally(() => res.status(r.status).json(r.body));

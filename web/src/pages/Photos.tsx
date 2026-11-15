@@ -1,11 +1,11 @@
 import type { EventCard } from "@tobe/core";
-import { Camera, CheckCircle2, Crown, Download, EyeOff, ImageUp, Loader2, Lock, ScanFace, Settings2, Share2, ShieldCheck, Trash2, UserX } from "lucide-react";
+import { Camera, CheckCircle2, Crown, Download, EyeOff, Glasses, ImageUp, Loader2, Lock, ScanFace, Settings2, Share2, ShieldCheck, Smartphone, Sun, Trash2, UserX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Card, Empty, PageLoader, Sheet, Toggle, cx } from "../components/ui";
 import { Img, Poster } from "../components/visual";
 import { absoluteMedia, api } from "../lib/api";
-import { selfieDescriptor, loadFaceApi } from "../lib/face";
+import { analyzeFrame, captureDescriptor, frameAdvice, loadFaceApi, loadLiveFaceApi, type FrameAnalysis } from "../lib/face";
 import { formatFcfa, shortDate } from "../lib/format";
 import { loadImage, resolveMedia } from "../lib/media";
 import { useSession } from "../lib/session";
@@ -28,18 +28,18 @@ export function Photos() {
 
   if (!ready) return <PageLoader />;
 
-  const onDescriptor = async (descriptor: number[]) => {
+  const onDescriptors = async (descriptors: number[][]) => {
     if (scan === "once") {
-      const r = await api<PhotoGroup[]>("POST", "/photos/match", { descriptor, eventId: eventFilter ?? undefined });
+      const r = await api<PhotoGroup[]>("POST", "/photos/match", { descriptors, eventId: eventFilter ?? undefined });
       setOnce(r);
-      setScan(null);
+      setTimeout(() => setScan(null), 700);
       return;
     }
-    const r = await api<{ groups: PhotoGroup[] }>("POST", "/me/face", { descriptor });
+    const r = await api<{ groups: PhotoGroup[] }>("POST", "/me/face", { descriptors });
     setData(r.groups);
-    setScan(null);
     await refresh();
-    toast("Pass ToBe activé : vos photos vous trouveront toutes seules");
+    setTimeout(() => setScan(null), 900);
+    toast(`Pass ToBe activé avec ${descriptors.length} empreinte${descriptors.length > 1 ? "s" : ""} : vos photos vous trouveront toutes seules`);
   };
 
   const startPass = async () => {
@@ -131,7 +131,7 @@ export function Photos() {
         </div>
       )}
 
-      <CameraSheet open={!!scan} onClose={() => setScan(null)} onDescriptor={onDescriptor} title={scan === "pass" ? "Activer le Pass ToBe" : "Chercher mes photos"} />
+      <CameraSheet open={!!scan} onClose={() => setScan(null)} onDescriptors={onDescriptors} mode={scan === "pass" ? "enroll" : "once"} title={scan === "pass" ? "Activer le Pass ToBe" : "Chercher mes photos"} />
       <PassSettings open={settings} onClose={() => setSettings(false)} />
     </div>
   );
@@ -341,20 +341,46 @@ function PassSettings({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
-/** Caméra frontale + détection du visage, ou import d'un selfie. */
-export function CameraSheet({ open, onClose, onDescriptor, title }: { open: boolean; onClose: () => void; onDescriptor: (d: number[]) => Promise<void>; title: string }) {
+type Step = { key: string; label: string; hint: string };
+const ENROLL_STEPS: Step[] = [
+  { key: "face", label: "De face", hint: "Regardez droit devant vous" },
+  { key: "side1", label: "Profil", hint: "Tournez lentement la tête d'un côté" },
+  { key: "side2", label: "Autre profil", hint: "Puis lentement de l'autre côté" },
+];
+const ONCE_STEPS: Step[] = [ENROLL_STEPS[0]];
+
+/**
+ * Caméra frontale guidée : la détection tourne en direct sur le téléphone, vérifie la lumière,
+ * la netteté, le cadrage, et capture automatiquement le visage sous plusieurs angles.
+ * Le mouvement de tête demandé empêche d'utiliser simplement la photo de quelqu'un d'autre.
+ */
+export function CameraSheet({ open, onClose, onDescriptors, title, mode }: { open: boolean; onClose: () => void; onDescriptors: (d: number[][]) => Promise<void>; title: string; mode: "enroll" | "once" }) {
   const video = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [state, setState] = useState<"consent" | "loading" | "camera" | "working" | "error">("consent");
+  const [state, setState] = useState<"consent" | "loading" | "camera" | "working" | "done" | "error">("consent");
   const [msg, setMsg] = useState("");
   const [agree, setAgree] = useState(false);
+  const [advice, setAdvice] = useState<string | null>("Placez votre visage dans l'ovale");
+  const [good, setGood] = useState(false);
+  const [step, setStep] = useState(0);
+  const [flash, setFlash] = useState(0);
+  const [slow, setSlow] = useState(false);
+  const samples = useRef<number[][]>([]);
+  const firstSide = useRef(0);
+  const running = useRef(false);
+  const steps = mode === "enroll" ? ENROLL_STEPS : ONCE_STEPS;
 
   useEffect(() => {
     if (!open) {
+      running.current = false;
       stream?.getTracks().forEach((t) => t.stop());
       setStream(null);
       setState("consent");
       setMsg("");
+      setStep(0);
+      setSlow(false);
+      samples.current = [];
+      firstSide.current = 0;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -366,81 +392,226 @@ export function CameraSheet({ open, onClose, onDescriptor, title }: { open: bool
     }
   }, [stream, state]);
 
+  const finish = async (list: number[][]) => {
+    running.current = false;
+    setState("working");
+    setMsg(mode === "enroll" ? "Enregistrement de votre Pass…" : "Recherche de vos photos…");
+    try {
+      await onDescriptors(list);
+      setState("done");
+    } catch (e) {
+      setState("error");
+      setMsg((e as Error).message);
+      samples.current = [];
+      firstSide.current = 0;
+      setStep(0);
+    }
+  };
+
+  // Boucle d'analyse en direct.
+  useEffect(() => {
+    if (state !== "camera" || !stream) return;
+    running.current = true;
+    let stable = 0;
+    let current = samples.current.length;
+    let stepStarted = performance.now();
+    const loop = async () => {
+      while (running.current) {
+        const v = video.current;
+        if (!v || v.readyState < 2) {
+          await new Promise((r) => setTimeout(r, 120));
+          continue;
+        }
+        let a: FrameAnalysis;
+        try {
+          a = await analyzeFrame(v);
+        } catch {
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
+        if (!running.current) break;
+        const base = frameAdvice(a);
+        let tip = base;
+        let ok = false;
+        const key = steps[current]?.key;
+        if (!base) {
+          if (key === "face") {
+            ok = Math.abs(a.yaw) < 0.12;
+            if (!ok) tip = "Regardez droit vers l'écran";
+          } else if (key === "side1") {
+            ok = Math.abs(a.yaw) > 0.2 && Math.abs(a.yaw) < 0.6;
+            if (!ok) tip = Math.abs(a.yaw) >= 0.6 ? "Un peu moins tourné" : "Tournez doucement la tête d'un côté";
+          } else if (key === "side2") {
+            ok = Math.abs(a.yaw) > 0.2 && Math.abs(a.yaw) < 0.6 && Math.sign(a.yaw) !== firstSide.current;
+            if (!ok) tip = Math.abs(a.yaw) >= 0.6 ? "Un peu moins tourné" : "Maintenant, de l'autre côté";
+          }
+        }
+        setGood(ok);
+        setAdvice(ok ? "Parfait, ne bougez plus…" : tip);
+        stable = ok ? stable + 1 : 0;
+        if (performance.now() - stepStarted > 20000 && current > 0) setSlow(true);
+        if (stable >= 3) {
+          const d = await captureDescriptor(v).catch(() => null);
+          if (d && running.current) {
+            if (key === "side1") firstSide.current = Math.sign(a.yaw) || 1;
+            samples.current = [...samples.current, d];
+            current = samples.current.length;
+            stable = 0;
+            stepStarted = performance.now();
+            setSlow(false);
+            setFlash((f) => f + 1);
+            navigator.vibrate?.(35);
+            setStep(current);
+            if (current >= steps.length) {
+              await finish(samples.current);
+              break;
+            }
+          }
+        }
+        await new Promise((r) => setTimeout(r, 90));
+      }
+    };
+    loop();
+    return () => {
+      running.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, stream]);
+
   const start = async () => {
     setState("loading");
     setMsg("Préparation de la reconnaissance faciale…");
     try {
-      const modelP = loadFaceApi();
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 720 } }, audio: false });
+      const modelP = loadLiveFaceApi();
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
       setStream(s);
       await modelP;
+      samples.current = [];
+      firstSide.current = 0;
+      setStep(0);
       setState("camera");
-      setMsg("Placez votre visage dans le cadre, bien éclairé.");
     } catch (e) {
       setState("error");
-      setMsg((e as Error).name === "NotAllowedError" ? "Accès à la caméra refusé. Vous pouvez importer un selfie à la place." : "Caméra indisponible. Importez un selfie à la place.");
+      setMsg((e as Error).name === "NotAllowedError" ? "Accès à la caméra refusé. Autorisez la caméra dans le navigateur, ou importez un selfie." : "Caméra indisponible. Importez un selfie à la place.");
     }
   };
 
-  const process = async (input: HTMLVideoElement | HTMLImageElement) => {
+  const importSelfie = async (f?: File) => {
+    if (!f) return;
+    running.current = false;
     setState("working");
-    setMsg("Analyse du visage…");
+    setMsg("Analyse du selfie…");
     try {
-      const d = await selfieDescriptor(input);
+      await loadFaceApi();
+      const img = await loadImage(URL.createObjectURL(f));
+      const d = await captureDescriptor(img);
       if (!d) {
-        setState(stream ? "camera" : "error");
-        setMsg("Aucun visage détecté. Rapprochez-vous et cherchez la lumière.");
+        setState("error");
+        setMsg("Aucun visage net sur cette photo. Essayez un selfie bien éclairé, de face.");
         return;
       }
-      await onDescriptor(d);
+      await finish([d]);
     } catch (e) {
       setState("error");
       setMsg((e as Error).message);
     }
   };
 
-  const importSelfie = async (f?: File) => {
-    if (!f) return;
-    setState("working");
-    setMsg("Préparation de la reconnaissance faciale…");
-    await loadFaceApi();
-    const img = await loadImage(URL.createObjectURL(f));
-    await process(img);
-  };
+  const ringColor = state === "done" ? "#22c58b" : good ? "#22c58b" : advice && advice.startsWith("Placez") ? "#ffffff" : "#ffb21e";
+  const progress = steps.length ? step / steps.length : 0;
+  const C = 2 * Math.PI * 47;
 
   return (
     <Sheet open={open} onClose={onClose} title={title} tall>
       {state === "consent" ? (
         <div className="space-y-4">
-          <p className="text-sm leading-relaxed text-muted">ToBe va analyser votre visage sur ce téléphone pour en tirer une empreinte (une suite de nombres). La photo elle-même n'est pas envoyée. Vous pouvez supprimer cette empreinte à tout moment.</p>
+          <div className="flex items-center gap-4 rounded-2xl bg-card-2 p-4">
+            <div className="grid size-14 shrink-0 place-items-center rounded-2xl brand-gradient text-white">
+              <ScanFace className="size-7" />
+            </div>
+            <div className="text-sm">
+              <div className="font-semibold">{mode === "enroll" ? "3 captures, 15 secondes" : "Une capture de face"}</div>
+              <div className="text-muted">{mode === "enroll" ? "De face, puis la tête légèrement tournée de chaque côté : vos photos seront mieux reconnues, même de profil." : "Votre visage n'est pas enregistré."}</div>
+            </div>
+          </div>
+          <p className="text-sm leading-relaxed text-muted">L'analyse se fait sur ce téléphone. Seule une empreinte (une suite de nombres) est envoyée, jamais la photo. Vous pouvez la supprimer à tout moment.</p>
           <label className="flex items-start gap-3 rounded-2xl border border-line bg-card p-4 text-sm">
             <input type="checkbox" className="mt-0.5 size-5 accent-[#1800ad]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
             <span>J'accepte que ToBe utilise l'empreinte de mon visage pour retrouver les photos où j'apparais.</span>
           </label>
-          <Button full disabled={!agree} onClick={start} icon={<Camera className="size-5" />}>
+          <Button full size="lg" disabled={!agree} onClick={start} icon={<Camera className="size-5" />}>
             Ouvrir la caméra
           </Button>
           <label className={cx("flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-full border border-line text-sm font-semibold", !agree && "pointer-events-none opacity-50")}>
             <input type="file" accept="image/*" capture="user" className="hidden" onChange={(e) => importSelfie(e.target.files?.[0])} />
-            <ImageUp className="size-4" /> Importer un selfie
+            <ImageUp className="size-4" /> Importer un selfie à la place
           </label>
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="relative mx-auto aspect-[3/4] w-full max-w-[300px] overflow-hidden rounded-[32px] bg-black">
+          <div className="relative mx-auto aspect-[3/4] w-full max-w-[320px] overflow-hidden rounded-[32px] bg-[#0b0b12]">
             {stream && <video ref={video} playsInline muted className="size-full -scale-x-100 object-cover" />}
-            <div className="pointer-events-none absolute inset-[12%] rounded-[45%] border-[3px] border-brand/80 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
-            {(state === "camera" || state === "working") && <div className="scanline pointer-events-none absolute inset-x-[14%] h-0.5 rounded bg-brand shadow-[0_0_14px_#1800ad]" />}
+            {/* Ovale de cadrage + anneau de progression */}
+            <svg viewBox="0 0 100 133" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 size-full">
+              <defs>
+                <mask id="oval-cut">
+                  <rect width="100" height="133" fill="white" />
+                  <ellipse cx="50" cy="60" rx="33" ry="44" fill="black" />
+                </mask>
+              </defs>
+              <rect width="100" height="133" fill="rgba(11,11,18,0.62)" mask="url(#oval-cut)" />
+              <ellipse cx="50" cy="60" rx="33" ry="44" fill="none" stroke={ringColor} strokeWidth="1.2" strokeDasharray={good ? "0" : "3 2"} style={{ transition: "stroke 0.25s" }} />
+            </svg>
+            <svg viewBox="0 0 100 100" className="pointer-events-none absolute left-1/2 top-[45%] w-[78%] -translate-x-1/2 -translate-y-1/2 -rotate-90">
+              <circle cx="50" cy="50" r="47" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="2" />
+              <circle cx="50" cy="50" r="47" fill="none" stroke="#22c58b" strokeWidth="2.6" strokeLinecap="round" strokeDasharray={`${C * progress} ${C}`} style={{ transition: "stroke-dasharray 0.5s ease" }} />
+            </svg>
+            {flash > 0 && <div key={flash} className="fade-out-flash pointer-events-none absolute inset-0 bg-white" />}
             {(state === "loading" || state === "working") && (
-              <div className="absolute inset-0 grid place-items-center">
-                <Loader2 className="size-10 animate-spin text-brand" />
+              <div className="absolute inset-0 grid place-items-center bg-black/30">
+                <Loader2 className="size-10 animate-spin text-white" />
+              </div>
+            )}
+            {state === "done" && (
+              <div className="absolute inset-0 grid place-items-center bg-black/40">
+                <div className="pop grid size-20 place-items-center rounded-full bg-emerald text-white">
+                  <CheckCircle2 className="size-11" />
+                </div>
+              </div>
+            )}
+            {state === "camera" && (
+              <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-black/60 px-3 py-2.5 text-center text-sm font-semibold text-white backdrop-blur">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-white/60">
+                  Étape {Math.min(step + 1, steps.length)}/{steps.length} · {steps[Math.min(step, steps.length - 1)].hint}
+                </div>
+                <div className={cx("mt-0.5", good ? "text-[#7ef0c0]" : "text-white")}>{advice}</div>
               </div>
             )}
           </div>
-          <p className={cx("text-center text-sm", state === "error" ? "text-coral" : "text-muted")}>{msg}</p>
-          {state === "camera" && (
-            <Button full size="lg" onClick={() => video.current && process(video.current)} icon={<ScanFace className="size-5" />}>
-              Scanner mon visage
+
+          {steps.length > 1 && (
+            <div className="flex justify-center gap-6">
+              {steps.map((s2, i) => (
+                <div key={s2.key} className="flex flex-col items-center gap-1.5">
+                  <div className={cx("grid size-9 place-items-center rounded-full border-2 text-xs font-bold transition", i < step ? "border-emerald bg-emerald text-white" : i === step ? "border-brand text-brand" : "border-line text-faint")}>
+                    {i < step ? <CheckCircle2 className="size-5" /> : i + 1}
+                  </div>
+                  <span className={cx("text-xs font-semibold", i <= step ? "text-ink" : "text-faint")}>{s2.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {msg && state !== "camera" && <p className={cx("text-center text-sm", state === "error" ? "text-coral" : "text-muted")}>{msg}</p>}
+          {state === "done" && <p className="text-center text-sm font-semibold text-emerald">{mode === "enroll" ? "Pass ToBe activé !" : "Recherche terminée"}</p>}
+          {state === "camera" && slow && samples.current.length > 0 && (
+            <Button full variant="outline" onClick={() => finish(samples.current)}>
+              Terminer avec {samples.current.length} capture{samples.current.length > 1 ? "s" : ""}
+            </Button>
+          )}
+          {state === "error" && (
+            <Button full onClick={start} icon={<Camera className="size-5" />}>
+              Réessayer
             </Button>
           )}
           {(state === "error" || state === "camera") && (
@@ -449,6 +620,11 @@ export function CameraSheet({ open, onClose, onDescriptor, title }: { open: bool
               <ImageUp className="size-4" /> Importer un selfie
             </label>
           )}
+          <ul className="space-y-1.5 rounded-2xl bg-card-2 p-4 text-xs text-muted">
+            <li className="flex items-center gap-2"><Sun className="size-3.5 text-brand" /> Face à la lumière, pas de contre-jour</li>
+            <li className="flex items-center gap-2"><Glasses className="size-3.5 text-brand" /> Retirez lunettes de soleil et casquette</li>
+            <li className="flex items-center gap-2"><Smartphone className="size-3.5 text-brand" /> Téléphone à hauteur des yeux</li>
+          </ul>
         </div>
       )}
     </Sheet>
