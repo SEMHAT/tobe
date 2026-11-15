@@ -1,6 +1,7 @@
 import { Bell, Compass, Home, Plus, ScanFace, Search, User } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useRouteRobots } from "../lib/seo";
 import { SessionProvider, useSession } from "../lib/session";
 import { cx } from "./ui";
 import { Avatar, Logo, QR } from "./visual";
@@ -108,6 +109,7 @@ function Footer() {
             <li><Link className="hover:text-ink" to="/creer">Créer un événement</Link></li>
             <li><Link className="hover:text-ink" to="/organisateur">Espace organisateur</Link></li>
             <li><Link className="hover:text-ink" to="/prestataires">Prestataires</Link></li>
+            <li><a className="hover:text-ink" href="https://eledji.com">Un service ELEDJI</a></li>
           </ul>
         </div>
         <div className="flex items-center gap-4 rounded-3xl border border-line bg-app p-4">
@@ -118,7 +120,7 @@ function Footer() {
           </div>
         </div>
       </div>
-      <div className="border-t border-line py-5 text-center text-xs text-faint">© {new Date().getFullYear()} ToBe · Sois-y. Retrouve-toi.</div>
+      <div className="border-t border-line py-5 text-center text-xs text-faint">© {new Date().getFullYear()} ToBe Lomé · Sois-y. Retrouve-toi. · <a className="hover:text-ink" href="https://eledji.com">ELEDJI</a></div>
     </footer>
   );
 }
@@ -127,6 +129,7 @@ function Frame() {
   const loc = useLocation();
   const scroller = useRef<HTMLDivElement>(null);
   const { theme } = useSession();
+  useRouteRobots(loc.pathname);
   const showTabs = TABS.includes(loc.pathname);
   const wide = WIDE.includes(loc.pathname) || /^\/(evenement|vote)\//.test(loc.pathname);
   useEffect(() => {

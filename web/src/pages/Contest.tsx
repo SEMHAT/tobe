@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { compact, countdown, formatFcfa, longDate, shareUrl, time, whatsappLink } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
+import { usePageMeta } from "../lib/seo";
 
 function modeLabel(c: ContestView) {
   return c.mode === "free" ? "1 vote gratuit par jour" : c.mode === "paid" ? `Vote payant · ${formatFcfa(c.votePrice)}` : `1 vote gratuit par jour`;
@@ -19,6 +20,7 @@ export function ContestPage() {
   const { id = "" } = useParams();
   const { me } = useSession();
   const { data: c, error, loading, reload } = useLoad(() => api<ContestView>("GET", `/contests/${id}`), [id, me?.user.id]);
+  usePageMeta(c ? { title: `Vote : ${c.title}`, description: `${c.eventTitle} — ${c.candidates.length} candidats. Votez sur ToBe.` } : null);
   const [q, setQ] = useState("");
   if (loading && !c) return <PageLoader />;
   if (error || !c)

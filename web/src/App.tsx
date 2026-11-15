@@ -15,10 +15,11 @@ import { Organizer, OrganizerEvent, Scanner } from "./pages/Organizer";
 import { Providers } from "./pages/Providers";
 import { TobeAdmin } from "./pages/Admin";
 import { NotFound } from "./pages/NotFound";
+import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
   const loc = useLocation();
-  if (!localStorage.getItem("tobe-onboarded") && window.matchMedia("(max-width: 1023px)").matches) return <Navigate to="/bienvenue" replace state={{ from: loc.pathname }} />;
+  if (!isCrawler() && !localStorage.getItem("tobe-onboarded") && window.matchMedia("(max-width: 1023px)").matches) return <Navigate to="/bienvenue" replace state={{ from: loc.pathname }} />;
   return <Home />;
 }
 

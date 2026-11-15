@@ -7,12 +7,40 @@
   "functions": {
     "api/handler.ts": {
       "maxDuration": 30
+    },
+    "api/seo.ts": {
+      "maxDuration": 15,
+      "includeFiles": "dist/index.html"
     }
   },
   "rewrites": [
     {
       "source": "/api/:path*",
       "destination": "/api/handler?p=:path*"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/seo?kind=sitemap"
+    },
+    {
+      "source": "/explorer",
+      "destination": "/api/seo?p=/explorer"
+    },
+    {
+      "source": "/prestataires",
+      "destination": "/api/seo?p=/prestataires"
+    },
+    {
+      "source": "/evenement/:id",
+      "destination": "/api/seo?p=/evenement/:id"
+    },
+    {
+      "source": "/vote/:id",
+      "destination": "/api/seo?p=/vote/:id"
+    },
+    {
+      "source": "/cagnotte/:id",
+      "destination": "/api/seo?p=/cagnotte/:id"
     },
     {
       "source": "/((?!api/|assets/|models/|.*\\..*).*)",

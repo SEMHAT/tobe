@@ -24,6 +24,7 @@ import { api } from "../lib/api";
 import { CATEGORY_LABELS, compact, countdown, formatFcfa, longDate, shareUrl, time, whatsappLink } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
+import { usePageMeta } from "../lib/seo";
 
 type Tab = "infos" | "programme" | "votes" | "cagnotte" | "photos";
 
@@ -37,6 +38,7 @@ export function EventPage() {
     if (code) sessionStorage.setItem(`code:${ev.id}`, code);
     return ev;
   }, [id, code, me?.user.id]);
+  usePageMeta(e ? { title: e.title, description: `${e.venue}, ${e.city}. ${e.description}`, noindex: e.visibility !== "public" } : null);
   const [tab, setTab] = useState<Tab>("infos");
 
   if (loading && !e) return <PageLoader />;
