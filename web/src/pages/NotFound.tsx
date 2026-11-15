@@ -1,8 +1,10 @@
 import { Compass } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button, Empty, TopBar } from "../components/ui";
+import { usePageMeta } from "../lib/seo";
 
 export function NotFound() {
+  usePageMeta({ title: "Page introuvable", noindex: true });
   return (
     <>
       <TopBar title="" />

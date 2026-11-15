@@ -9,6 +9,7 @@ import { api, HttpError } from "../lib/api";
 import { ago, formatFcfa, shareUrl, whatsappLink } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
+import { usePageMeta } from "../lib/seo";
 
 interface CagnotteData {
   id: string;
@@ -45,6 +46,7 @@ export function CagnottePage() {
       throw e;
     }
   }, [id, me?.user.id]);
+  usePageMeta(c ? { title: `Cagnotte : ${c.title}`, description: c.description } : null);
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(10000);
   const [custom, setCustom] = useState("");
