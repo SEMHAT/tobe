@@ -1,7 +1,7 @@
 export * from "./types.js";
 export * from "./db.js";
 export * from "./rules.js";
-export { ToBeService, type ServiceOptions, type EventCard, type EventView, type CandidateView, type ContestView, type CreateEventInput } from "./service.js";
+export { ToBeService, type ServiceOptions, type EventCard, type EventView, type CandidateView, type ContestView, type CreateEventInput, type EditEventInput } from "./service.js";
 export { seedDb } from "./seed.js";
 export * from "./api.js";
 export { sendLoginCode } from "./email.js";

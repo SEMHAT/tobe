@@ -100,6 +100,8 @@ export interface TobeEvent {
   cagnotteId: string | null;
   tobeRequestId: string | null;
   createdAt: string;
+  /** Dernière modification par l'organisateur. */
+  updatedAt?: string | null;
   demoOwned?: boolean;
 }
 

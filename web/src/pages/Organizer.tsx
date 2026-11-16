@@ -2,6 +2,8 @@ import type { EventCard, EventView, PayMethod } from "@tobe/core";
 import { PRICING, type BoostPlan } from "@tobe/core";
 import {
   BarChart3,
+  ChevronRight,
+  Pencil,
   Camera,
   CheckCircle2,
   Crown,
@@ -214,6 +216,18 @@ export function OrganizerEvent() {
           </div>
           <TierBadge tier={ev.impact.tier} />
         </Link>
+        {acc.edit && (
+          <Link to={`/organisateur/${ev.id}/modifier`} className="mt-3 flex items-center gap-3 rounded-2xl border border-brand/30 bg-brand-soft/60 p-3.5 dark:bg-brand/15">
+            <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white">
+              <Pencil className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Modifier l'événement</span>
+              <span className="block text-xs text-muted">Nom, description, prix, date, lieu, affiche…</span>
+            </span>
+            <ChevronRight className="size-5 text-brand" />
+          </Link>
+        )}
 
         {r.myRole !== "owner" && (
           <div className="mt-3 rounded-2xl border border-brand/30 bg-brand-soft/60 p-3.5 text-sm dark:bg-brand/15">

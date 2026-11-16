@@ -17,6 +17,7 @@ import { TobeAdmin } from "./pages/Admin";
 import { NotFound } from "./pages/NotFound";
 import { Club } from "./pages/Club";
 import { Invitation } from "./pages/Invitation";
+import { EditEvent } from "./pages/EditEvent";
 import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
@@ -47,6 +48,7 @@ export function App() {
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/organisateur" element={<Organizer />} />
           <Route path="/organisateur/:id" element={<OrganizerEvent />} />
+          <Route path="/organisateur/:id/modifier" element={<EditEvent />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/prestataires" element={<Providers />} />
           <Route path="/tobe" element={<TobeAdmin />} />

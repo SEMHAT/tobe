@@ -124,6 +124,31 @@ export interface ContestView extends Omit<Contest, "candidates"> {
   isOrganizer: boolean;
 }
 
+/** Ce que l'organisateur peut corriger après publication. */
+export interface EditEventInput {
+  title?: string;
+  category?: Category;
+  description?: string;
+  startsAt?: string;
+  endsAt?: string | null;
+  venue?: string;
+  city?: string;
+  lat?: number | null;
+  lng?: number | null;
+  cover?: string | null;
+  theme?: Theme | null;
+  visibility?: Visibility;
+  accessCode?: string | null;
+  invitees?: string[];
+  access?: Access;
+  ticketTypes?: { id?: string; name: string; price: number; quota?: number }[];
+  expectedAttendance?: number;
+  reach?: Reach | null;
+  program?: { time: string; label: string }[];
+  liveUrl?: string | null;
+  options?: Partial<EventOptions>;
+}
+
 export interface CreateEventInput {
   title: string;
   category: Category;
@@ -615,17 +640,121 @@ export class ToBeService {
     return this.getEvent(id, user.id);
   }
 
-  updateEvent(userId: string, idOrSlug: string, patch: Partial<CreateEventInput>): EventView {
+  /**
+   * Modification d'un événement par son organisateur (ou un co-organisateur).
+   * Le lien de l'événement ne change pas. Les billets déjà vendus sont protégés,
+   * et les participants sont prévenus si la date, l'heure ou le lieu changent.
+   */
+  updateEvent(userId: string, idOrSlug: string, patch: EditEventInput): EventView {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!this.canManage(e, user)) throw new ApiError(403, "Seul l'organisateur peut modifier cet événement");
-    const allowed: (keyof TobeEvent)[] = ["title", "description", "venue", "city", "cover", "theme", "visibility", "expectedAttendance", "reach", "liveUrl", "program", "options", "lat", "lng"];
     const next: Partial<TobeEvent> = {};
-    for (const k of allowed) if (k in patch) (next as Record<string, unknown>)[k] = (patch as Record<string, unknown>)[k];
-    if (patch.startsAt) next.startsAt = new Date(patch.startsAt).toISOString();
-    if (patch.invitees) next.invitees = patch.invitees.map((p) => normalizeEmail(p));
-    if (patch.visibility === "private" && !e.accessCode) next.accessCode = randomCode(6);
-    this.db.events.update(e.id, next);
+
+    if (patch.title !== undefined) {
+      const title = String(patch.title).trim();
+      if (title.length < 3) throw new ApiError(400, "Donnez un titre à votre événement");
+      next.title = title.slice(0, 80);
+    }
+    if (patch.venue !== undefined) {
+      if (!String(patch.venue).trim()) throw new ApiError(400, "Indiquez le lieu");
+      next.venue = String(patch.venue).trim();
+    }
+    if (patch.city !== undefined) next.city = String(patch.city).trim() || "Lomé";
+    if (patch.description !== undefined) next.description = String(patch.description).trim();
+    if (patch.category !== undefined) next.category = patch.category;
+    for (const k of ["cover", "theme", "lat", "lng", "liveUrl", "reach"] as const) if (k in patch) (next as Record<string, unknown>)[k] = patch[k] ?? null;
+    if (patch.theme === null) next.theme = e.theme;
+    if (patch.reach === null) next.reach = e.reach;
+    if (patch.program !== undefined) next.program = (patch.program ?? []).filter((x) => x.label?.trim()).map((x) => ({ time: String(x.time ?? "").slice(0, 10), label: x.label.trim().slice(0, 120) }));
+    if (patch.expectedAttendance !== undefined) next.expectedAttendance = Math.max(1, Math.round(Number(patch.expectedAttendance) || e.expectedAttendance));
+    if (patch.options !== undefined) next.options = { ...e.options, ...patch.options, cagnotte: !!e.cagnotteId || (!!patch.options.cagnotte && this.opts.paymentsEnabled) };
+
+    // Date et heure
+    const startsAt = patch.startsAt !== undefined ? new Date(patch.startsAt) : new Date(e.startsAt);
+    if (Number.isNaN(startsAt.getTime())) throw new ApiError(400, "Date invalide");
+    if (patch.startsAt !== undefined && startsAt.toISOString() !== e.startsAt) {
+      if (startsAt.getTime() < this.now().getTime() - 3600_000) throw new ApiError(400, "La nouvelle date est déjà passée");
+      next.startsAt = startsAt.toISOString();
+    }
+    if (patch.endsAt !== undefined) {
+      const end = patch.endsAt ? new Date(patch.endsAt) : null;
+      if (end && Number.isNaN(end.getTime())) throw new ApiError(400, "Heure de fin invalide");
+      if (end && end.getTime() <= startsAt.getTime()) throw new ApiError(400, "La fin doit être après le début");
+      next.endsAt = end ? end.toISOString() : null;
+    }
+
+    // Visibilité, code d'accès, invités
+    if (patch.visibility !== undefined) next.visibility = patch.visibility;
+    const visibility = next.visibility ?? e.visibility;
+    if (visibility === "private") {
+      if (patch.accessCode !== undefined && String(patch.accessCode ?? "").trim()) next.accessCode = String(patch.accessCode).trim().toUpperCase().replace(/\s/g, "").slice(0, 20);
+      else if (!e.accessCode) next.accessCode = randomCode(6);
+    } else if (patch.visibility !== undefined) next.accessCode = null;
+    if (patch.invitees !== undefined)
+      next.invitees = (patch.invitees ?? [])
+        .map((p) => {
+          try {
+            return normalizeEmail(p);
+          } catch {
+            return "";
+          }
+        })
+        .filter(Boolean);
+
+    // Accès et billets : ce qui est déjà réservé reste valable.
+    const soldPaid = e.ticketTypes.some((t) => t.sold > 0 && t.price > 0);
+    const access = patch.access ?? e.access;
+    if (access !== e.access && soldPaid) throw new ApiError(400, "Des billets payants sont déjà réservés : vous ne pouvez plus changer le type d'accès");
+    if (patch.access !== undefined) next.access = access;
+    if (patch.ticketTypes !== undefined || access !== e.access) {
+      const wanted = (patch.ticketTypes ?? []).filter((t) => String(t.name ?? "").trim() || t.id);
+      let types: TobeEvent["ticketTypes"];
+      if (access === "paid") {
+        types = wanted.map((t) => {
+          const old = t.id ? e.ticketTypes.find((x) => x.id === t.id) : undefined;
+          const name = String(t.name ?? "").trim() || old?.name || "Billet";
+          const price = Math.max(0, Math.round(Number(t.price) || 0));
+          const quota = Math.max(0, Math.round(Number(t.quota) || 0));
+          if (old && quota && quota < old.sold) throw new ApiError(400, `« ${name} » : ${old.sold} places déjà réservées, le nombre de places ne peut pas être inférieur`);
+          return { id: old?.id ?? newId("tkt"), name: name.slice(0, 40), price, quota, sold: old?.sold ?? 0 };
+        });
+        if (!types.some((t) => t.price > 0)) throw new ApiError(400, "Ajoutez au moins un billet payant");
+      } else {
+        const first = e.ticketTypes[0];
+        const q = Math.max(0, Math.round(Number(wanted[0]?.quota ?? first?.quota ?? 0) || 0));
+        const sold = e.ticketTypes.reduce((n, t) => n + t.sold, 0);
+        if (q && q < sold) throw new ApiError(400, `${sold} places déjà réservées : le nombre de places ne peut pas être inférieur`);
+        types = [{ id: first?.id ?? newId("tkt"), name: access === "invite" ? "Invitation" : "Entrée libre", price: 0, quota: q, sold: first?.sold ?? 0 }];
+      }
+      for (const old of e.ticketTypes)
+        if (old.sold > 0 && !types.some((t) => t.id === old.id))
+          throw new ApiError(400, `« ${old.name} » a déjà ${old.sold} réservation(s) : il ne peut pas être supprimé. Mettez son nombre de places à ${old.sold} pour arrêter la vente.`);
+      next.ticketTypes = types;
+    }
+
+    const updated = this.db.events.update(e.id, { ...next, updatedAt: this.iso() });
+
+    // Prévenir les participants et les personnes qui ont demandé un rappel.
+    const changes: string[] = [];
+    if (next.startsAt) changes.push(`nouvelle date : ${new Date(updated.startsAt).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })} à ${updated.startsAt.slice(11, 16).replace(":", "h")}`);
+    if (next.venue && next.venue !== e.venue) changes.push(`nouveau lieu : ${updated.venue}`);
+    if (next.city && next.city !== e.city) changes.push(`ville : ${updated.city}`);
+    if (changes.length) {
+      const people = new Set<string>();
+      for (const o of this.db.orders.filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved"))) people.add(o.userId);
+      for (const r of this.db.reminders.filter((r) => r.eventId === e.id && !!r.userId)) people.add(r.userId!);
+      people.delete(user.id);
+      const title = `Changement : ${updated.title}`;
+      const body = changes.map((c, i) => (i ? c : c[0].toUpperCase() + c.slice(1))).join(" · ") + ".";
+      for (const uid of people) this.notify(uid, title, body, `/evenement/${updated.slug}`, { title, body, url: `/evenement/${updated.slug}`, tag: `changement-${e.id}` });
+      for (const r of this.db.reminders.filter((r) => r.eventId === e.id && !r.userId && !!r.subId)) {
+        const sub = this.db.pushSubs.get(r.subId!);
+        if (sub) this.sendPush(sub, { title, body, url: `/evenement/${updated.slug}`, tag: `changement-${e.id}` });
+      }
+    }
+    // Nouvelle date : les rappels repartent sur le nouveau calendrier.
+    if (next.startsAt) this.reminders.reschedule(updated);
     return this.getEvent(e.id, user.id);
   }
 

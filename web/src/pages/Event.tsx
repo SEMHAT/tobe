@@ -12,6 +12,7 @@ import {
   Radio,
   Settings2,
   Share2,
+  Pencil,
   Bell,
   BellRing,
   Check,
@@ -91,6 +92,11 @@ export function EventPage() {
             transparent
             right={
               <>
+                {e.isOrganizer && (
+                  <Link to={`/organisateur/${e.id}/modifier`} aria-label="Modifier" className="grid size-10 place-items-center rounded-full bg-black/35 text-white backdrop-blur-md">
+                    <Pencil className="size-5" />
+                  </Link>
+                )}
                 {e.isOrganizer && (
                   <Link to={`/organisateur/${e.id}`} aria-label="Gérer" className="grid size-10 place-items-center rounded-full bg-black/35 text-white backdrop-blur-md">
                     <Settings2 className="size-5" />

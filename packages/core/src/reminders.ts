@@ -179,6 +179,12 @@ export class Reminders {
     return { following: !!r, source: r?.source ?? null, schedule: this.schedule(e) };
   }
 
+  /** L'événement change de date : chaque rappel repart sur le nouveau calendrier. */
+  reschedule(e: TobeEvent) {
+    const due = this.alreadyDue(e);
+    for (const r of this.db.reminders.filter((r) => r.eventId === e.id)) this.db.reminders.update(r.id, { sent: due });
+  }
+
   /** Les moments où partiront les rappels (affichés à l'utilisateur). */
   schedule(e: TobeEvent) {
     const start = new Date(e.startsAt);

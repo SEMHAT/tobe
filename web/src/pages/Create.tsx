@@ -627,6 +627,9 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
             </Button>
           </Link>
         </div>
+        <Link to={`/organisateur/${e.id}/modifier`} className="block text-center text-sm font-semibold text-brand">
+          Une erreur ? Modifier l'événement
+        </Link>
       </div>
     </div>
   );

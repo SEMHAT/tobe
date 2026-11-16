@@ -1,0 +1,85 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { ApiError, createDb, ToBeService, type PushPayload } from "./index.js";
+
+function setup() {
+  const db = createDb();
+  let t = new Date("2026-11-20T10:00:00Z");
+  const pushes: PushPayload[] = [];
+  const svc = new ToBeService(db, { now: () => t, exposeOtp: true, push: { publicKey: "pk", send: async (_s, p) => (pushes.push(p), "ok") } });
+  const login = (email: string, name = "Ama") => {
+    const { devCode } = svc.requestOtp(email);
+    return svc.verifyOtp(email, devCode!, name).user;
+  };
+  const orga = login("orga@exemple.tg", "Orga");
+  const e = svc.createEvent(orga.id, {
+    title: "Concret Live",
+    category: "concert",
+    startsAt: "2026-11-28T20:00:00Z",
+    venue: "Palais",
+    description: "Erreur de frappe",
+    visibility: "public",
+    access: "paid",
+    ticketTypes: [
+      { name: "Standard", price: 5000, quota: 100 },
+      { name: "VIP", price: 20000, quota: 20 },
+    ],
+    expectedAttendance: 200,
+    reach: "ville",
+    options: { tickets: true } as never,
+  });
+  return { db, svc, login, orga, e, pushes, at: (d: string) => (t = new Date(d)) };
+}
+
+test("modifier : titre, description et prix ; le lien ne change pas", () => {
+  const { svc, orga, e } = setup();
+  const v = svc.updateEvent(orga.id, e.id, {
+    title: "Concert Live",
+    description: "Le grand concert de l'année",
+    ticketTypes: [
+      { id: e.ticketTypes[0].id, name: "Standard", price: 3000, quota: 150 },
+      { id: e.ticketTypes[1].id, name: "VIP", price: 15000, quota: 20 },
+      { name: "Étudiant", price: 2000, quota: 50 },
+    ],
+  });
+  assert.equal(v.title, "Concert Live");
+  assert.equal(v.slug, e.slug, "les liens déjà partagés restent valables");
+  assert.deepEqual(v.ticketTypes.map((t) => [t.name, t.price]), [["Standard", 3000], ["VIP", 15000], ["Étudiant", 2000]]);
+  assert.ok(v.updatedAt);
+});
+
+test("modifier : les billets déjà réservés sont protégés", () => {
+  const { svc, orga, e, login } = setup();
+  const fan = login("fan@exemple.tg", "Fan");
+  const order = svc.buyTickets(fan.id, e.id, { ticketTypeId: e.ticketTypes[1].id, qty: 3, method: "cash" });
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { ticketTypes: [{ id: e.ticketTypes[0].id, name: "Standard", price: 5000 }] }), (x: ApiError) => /VIP/.test(x.message));
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { ticketTypes: [{ id: e.ticketTypes[1].id, name: "VIP", price: 20000, quota: 2 }] }), (x: ApiError) => /3 places/.test(x.message));
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { access: "free" }), (x: ApiError) => /type d'accès/.test(x.message));
+  // Changer le prix ne change pas ce qui a déjà été réservé.
+  svc.updateEvent(orga.id, e.id, { ticketTypes: [{ id: e.ticketTypes[0].id, name: "Standard", price: 5000 }, { id: e.ticketTypes[1].id, name: "VIP", price: 25000, quota: 20 }] });
+  assert.equal(svc.getTicket(fan.id, order.id).total, order.total);
+  // Seul l'organisateur modifie.
+  assert.throws(() => svc.updateEvent(fan.id, e.id, { title: "Piraté" }), (x: ApiError) => x.status === 403);
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { title: "" }), ApiError);
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { startsAt: "2026-11-01T20:00:00Z" }), (x: ApiError) => /passée/.test(x.message));
+  assert.throws(() => svc.updateEvent(orga.id, e.id, { endsAt: "2026-11-28T19:00:00Z" }), (x: ApiError) => /après le début/.test(x.message));
+});
+
+test("modifier la date ou le lieu prévient les participants et recale les rappels", async () => {
+  const { svc, db, orga, e, login, pushes, at } = setup();
+  const fan = login("fan@exemple.tg", "Fan");
+  svc.reminders.subscribe(fan.id, { endpoint: "https://push.example/fan", keys: { p256dh: "k", auth: "a" } });
+  svc.buyTickets(fan.id, e.id, { ticketTypeId: e.ticketTypes[0].id, qty: 1, method: "cash" });
+  // Sans changement de date ni de lieu, personne n'est dérangé.
+  svc.updateEvent(orga.id, e.id, { description: "Nouvelle description" });
+  await Promise.all(svc.pending.splice(0));
+  assert.equal(pushes.length, 0);
+  at("2026-11-26T21:00:00Z"); // « 2 jours avant » déjà passé pour l'ancienne date
+  svc.reminders.processDue();
+  svc.updateEvent(orga.id, e.id, { startsAt: "2026-12-05T19:00:00Z", venue: "Stade de Kégué" });
+  await Promise.all(svc.pending.splice(0));
+  const change = pushes.find((p) => p.title.startsWith("Changement"))!;
+  assert.match(change.body, /Nouvelle date : samedi 5 décembre à 19h00 · nouveau lieu : Stade de Kégué/);
+  assert.ok(svc.notifications(fan.id).some((n) => n.title === "Changement : Concret Live"));
+  assert.deepEqual(db.reminders.all()[0].sent, [], "les rappels repartent de zéro pour la nouvelle date");
+});
