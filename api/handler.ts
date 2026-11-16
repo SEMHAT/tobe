@@ -5,7 +5,7 @@ import { runApi, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? process.env.POSTGRES_URL }) as unknown as PgPool;
+const pool = new Pool({ connectionString: process.env.ELEDJI_DATABASE_URL ?? process.env.DATABASE_URL ?? process.env.POSTGRES_URL }) as unknown as PgPool;
 
 type Req = IncomingMessage & { body?: unknown; query?: Record<string, string | string[]> };
 
