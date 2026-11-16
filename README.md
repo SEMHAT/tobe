@@ -17,6 +17,10 @@ Le même code métier tourne côté serveur et, en **mode démo**, directement d
 
 - **Connexion avec Google** ou **par e-mail** (code à 6 chiffres envoyé par Resend), sans mot de passe.
 - **ToBe Club** : bonus du jour avec série, roue du jour, quiz quotidien sur Lomé et le Togo, missions, parrainage, niveaux, classement du mois et récompenses (boost, Premium, badge, lots ajoutés par l'agence). Tous les tirages et réponses sont vérifiés côté serveur.
+- **Rappels et notifications push** (comme WhatsApp) : bouton « Me rappeler » sur chaque événement et rappels automatiques à chaque billet, 2 jours avant, la veille, le jour J (8 h) et 30 minutes avant. Les clés VAPID sont créées automatiquement et gardées dans la base. La tâche planifiée `.github/workflows/rappels.yml` appelle `/api/cron/reminders` toutes les 5 minutes.
+- **Installation de l'application** : fenêtre « Installez ToBe » (Android, ordinateur) et mode d'emploi pour iPhone (Partager → Sur l'écran d'accueil). Sur iPhone, les notifications ne marchent qu'une fois l'application ajoutée à l'écran d'accueil.
+- **Équipe d'un événement** : l'organisateur invite par lien WhatsApp un co-organisateur, des contrôleurs d'entrée (scan des billets) et des photographes ; chacun n'a que les droits de son rôle.
+- **Équipe ToBe** : super administrateur (ADMIN_EMAILS), administrateur, chef de projet (dossiers « Confier à ToBe » qui lui sont attribués), modérateur, marketing (ToBe Club), support (lecture seule). Invitations par lien WhatsApp.
 - **Pass ToBe guidé** : caméra en direct qui vérifie cadrage, lumière et netteté, puis capture 3 angles (face et profils) ; le mouvement de tête écarte les photos de photos.
 - **Accueil** : à la une (événements boostés), ce week-end, votes en cours, les plus marquants.
 - **Explorer** : recherche, catégories, dates, gratuit/payant, tri par date ou par impact, **carte** OpenStreetMap.

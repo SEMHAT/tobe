@@ -26,7 +26,9 @@ export interface User {
   phone: string | null;
   name: string;
   createdAt: string;
+  /** "admin" = membre de l'équipe ToBe (le détail des droits est dans teamRole). */
   role: "user" | "admin";
+  teamRole?: TeamRole | null;
   passEnabled: boolean;
   faceDescriptor: number[] | null;
   /** Plusieurs empreintes du même visage (face, profil gauche, profil droit) : reconnaissance plus fiable. */
@@ -228,6 +230,8 @@ export interface TobeRequest {
   name: string;
   eventTitle: string;
   status: "nouveau" | "contacte" | "devis" | "signe" | "perdu";
+  /** Chef de projet ToBe en charge du dossier. */
+  assignedTo?: string | null;
   createdAt: string;
 }
 
@@ -271,6 +275,8 @@ export interface Player {
   referrals: number;
   boostCredits: number;
   badges: string[];
+  /** Première ouverture de l'application installée. */
+  installedAt?: string | null;
 }
 
 export interface LedgerEntry {
@@ -308,4 +314,62 @@ export interface Redemption {
   code: string;
   status: "livre" | "a-remettre" | "remis";
   createdAt: string;
+}
+
+// ---------- Équipe ToBe (agence) ----------
+export type TeamRole = "super_admin" | "admin" | "chef_projet" | "moderateur" | "support" | "marketing";
+
+// ---------- Équipe d'un événement ----------
+export type EventRole = "co_organisateur" | "controleur" | "photographe";
+
+export interface EventMember {
+  id: string;
+  eventId: string;
+  userId: string;
+  role: EventRole;
+  addedBy: string;
+  createdAt: string;
+}
+
+/** Invitation envoyée par lien (WhatsApp, copie) : rejoindre l'équipe d'un événement ou l'équipe ToBe. */
+export interface Invite {
+  id: string; // le jeton, partagé dans le lien
+  kind: "event" | "team";
+  role: EventRole | TeamRole;
+  eventId: string | null;
+  label: string; // nom de la personne invitée, pour s'y retrouver
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  usedBy: string | null;
+  usedAt: string | null;
+  revoked: boolean;
+}
+
+// ---------- Rappels et notifications push ----------
+export interface PushSub {
+  id: string; // empreinte de l'adresse d'envoi
+  userId: string | null;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  ua: string;
+  createdAt: string;
+  failures: number;
+}
+
+export type ReminderStage = "j2" | "veille" | "jourj" | "bientot";
+
+export interface Reminder {
+  id: string;
+  eventId: string;
+  userId: string | null;
+  subId: string | null; // visiteur non connecté : rappel lié à son téléphone
+  source: "follow" | "ticket";
+  sent: ReminderStage[];
+  createdAt: string;
+}
+
+export interface Setting {
+  id: string;
+  value: Record<string, unknown>;
 }

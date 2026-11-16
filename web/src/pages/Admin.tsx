@@ -1,6 +1,8 @@
 import type { EventCard, Provider, TobeRequest } from "@tobe/core";
-import { BadgeCheck, Gift, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
+import { BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
 import { useState } from "react";
+import { InviteSheet, type InviteResult } from "../components/TeamInvite";
+import { Avatar } from "../components/visual";
 import { Button, Empty, ErrorState, Field, PageLoader, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
 import { api } from "../lib/api";
 import { ago, compact, formatFcfa, formatPhone } from "../lib/format";
@@ -8,7 +10,9 @@ import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
 interface Overview {
-  requests: (TobeRequest & { event: EventCard | null })[];
+  me: { id: string; role: string; label: string; perms: string[] };
+  projectManagers: { id: string; name: string; role: string | null }[];
+  requests: (TobeRequest & { event: EventCard | null; assignee: { id: string; name: string } | null })[];
   providers: Provider[];
   revenue: Record<string, { amount: number; platform: number; count: number }>;
   platformTotal: number;
@@ -44,6 +48,17 @@ export function TobeAdmin() {
       toast((e as Error).message, "error");
     }
   };
+  const can = (p: string) => data.me.perms.includes(p);
+  const assign = async (id: string, assignee: string | null) => {
+    try {
+      const r = await api<TobeRequest>("PATCH", `/admin/requests/${id}/assign`, { assignee });
+      const who = data.projectManagers.find((m) => m.id === assignee);
+      setData({ ...data, requests: data.requests.map((x) => (x.id === id ? { ...x, ...r, assignee: who ? { id: who.id, name: who.name } : null } : x)) });
+      toast(assignee ? `Dossier confié à ${assignee === data.me.id ? "vous" : who?.name}` : "Dossier libéré");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
   const setProvider = async (id: string, patch: { status?: Provider["status"]; certified?: boolean }) => {
     try {
       const p = await api<Provider>("PATCH", `/admin/providers/${id}`, patch);
@@ -54,9 +69,9 @@ export function TobeAdmin() {
   };
   return (
     <div className="pb-10">
-      <TopBar title="Espace agence ToBe" />
+      <TopBar title="Espace agence ToBe" right={<span className="rounded-full bg-brand-soft px-3 py-1 text-xs font-bold text-brand dark:bg-brand/20 dark:text-white">{data.me.label}</span>} />
       <div className="px-5 pt-4 lg:px-0">
-        {payments && <><div className="rounded-[22px] brand-gradient p-5 text-white">
+        {payments && can("stats.view") && <><div className="rounded-[22px] brand-gradient p-5 text-white">
           <div className="text-sm font-semibold">Revenus de la plateforme</div>
           <div className="mt-1 font-display text-3xl font-extrabold">{formatFcfa(data.platformTotal)}</div>
         </div>
@@ -111,13 +126,34 @@ export function TobeAdmin() {
               {r.services.length > 0 && <div className="mt-1 text-sm text-muted">{r.services.join(", ")}</div>}
               {r.budget && <div className="mt-1 text-sm">Budget : {r.budget}</div>}
               {r.note && <p className="mt-1 text-sm italic text-muted">« {r.note} »</p>}
-              <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto">
+              <div className="mt-3 flex items-center gap-2 rounded-xl bg-card-2 px-3 py-2 text-sm">
+                <span className="text-muted">Chef de projet :</span>
+                {can("requests.all") ? (
+                  <select className="min-w-0 flex-1 bg-transparent font-semibold outline-none" value={r.assignedTo ?? ""} onChange={(e) => assign(r.id, e.target.value || null)}>
+                    <option value="">Non attribué</option>
+                    {data.projectManagers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : r.assignee ? (
+                  <span className="font-semibold">{r.assignee.id === data.me.id ? "Vous" : r.assignee.name}</span>
+                ) : can("requests.mine") ? (
+                  <button onClick={() => assign(r.id, data.me.id)} className="ml-auto h-8 rounded-full bg-brand px-3 text-xs font-bold text-white">
+                    Prendre ce dossier
+                  </button>
+                ) : (
+                  <span className="text-faint">Non attribué</span>
+                )}
+              </div>
+              {(can("requests.all") || r.assignedTo === data.me.id) && <div className="no-scrollbar mt-3 flex gap-1.5 overflow-x-auto">
                 {STATUSES.map(([s, l]) => (
                   <button key={s} onClick={() => setStatus(r.id, s)} className={cx("h-8 shrink-0 rounded-full border px-3 text-xs font-semibold", r.status === s ? "border-brand bg-brand text-white" : "border-line")}>
                     {l}
                   </button>
                 ))}
-              </div>
+              </div>}
             </div>
           ))}
         </div>
@@ -144,7 +180,7 @@ export function TobeAdmin() {
                   </span>
                 </div>
                 <p className="mt-2 line-clamp-3 text-sm text-muted">{p.bio}</p>
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                {can("providers.moderate") && <div className="mt-3 flex flex-wrap gap-1.5">
                   {p.status !== "approved" && (
                     <button onClick={() => setProvider(p.id, { status: "approved" })} className="h-8 rounded-full bg-brand px-3 text-xs font-bold text-white">
                       Valider
@@ -158,13 +194,14 @@ export function TobeAdmin() {
                   <button onClick={() => setProvider(p.id, { certified: !p.certified })} className="h-8 rounded-full border border-line px-3 text-xs font-semibold">
                     {p.certified ? "Retirer le badge" : "Badge « Certifié ToBe »"}
                   </button>
-                </div>
+                </div>}
               </div>
             ))}
           </div>
         </div>
         </div>
-        <ClubAdmin />
+        {can("club.manage") && <ClubAdmin />}
+        <TeamAdmin />
       </div>
     </div>
   );
@@ -297,6 +334,123 @@ function ClubAdmin() {
           </Button>
         </div>
       </Sheet>
+    </section>
+  );
+}
+
+// ---------- Équipe ToBe : super admin, admins, chefs de projet… ----------
+interface TeamData {
+  me: { role: string; label: string; perms: string[] };
+  roles: { id: string; label: string; description: string; rank: number; assignable: boolean }[];
+  members: { id: string; name: string; email: string; phone: string | null; avatar: string | null; role: string; roleLabel: string; fixed: boolean }[];
+  invites: { id: string; role: string; label: string; createdAt: string }[];
+}
+
+function TeamAdmin() {
+  const { me, toast } = useSession();
+  const { data, setData, reload } = useLoad(() => api<TeamData>("GET", "/team"), [me?.user.id]);
+  const [open, setOpen] = useState(false);
+  if (!data) return null;
+  const manage = data.me.perms.includes("team.manage");
+  const roleOf = (id: string) => data.roles.find((r) => r.id === id);
+  const change = async (memberId: string, role: string | null) => {
+    if (!role && !confirm("Retirer cette personne de l'équipe ToBe ?")) return;
+    try {
+      await api("PATCH", `/team/members/${memberId}`, { role });
+      if (!role) setData({ ...data, members: data.members.filter((m) => m.id !== memberId) });
+      else setData({ ...data, members: data.members.map((m) => (m.id === memberId ? { ...m, role, roleLabel: roleOf(role)?.label ?? role } : m)) });
+      toast(role ? "Rôle mis à jour" : "Membre retiré de l'équipe");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const revoke = async (token: string) => {
+    try {
+      await api("DELETE", `/invites/${token}`);
+      setData({ ...data, invites: data.invites.filter((i) => i.id !== token) });
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  return (
+    <section className="mt-10">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-lg font-bold">
+          <Users className="size-5 text-brand" /> Équipe ToBe
+        </h2>
+        {manage && (
+          <Button size="sm" icon={<UserPlus className="size-4" />} onClick={() => setOpen(true)}>
+            Inviter un membre
+          </Button>
+        )}
+      </div>
+      <div className="mt-4 lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
+        <div className="overflow-hidden rounded-2xl border border-line bg-card">
+          {data.members.map((m) => {
+            const editable = manage && !m.fixed && m.id !== me?.user.id && !!roleOf(m.role)?.assignable;
+            return (
+              <div key={m.id} className="flex items-center gap-3 border-t border-line px-4 py-3 first:border-t-0">
+                <Avatar name={m.name || m.email} src={m.avatar} size={40} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">
+                    {m.name || m.email} {m.id === me?.user.id && <span className="text-xs font-normal text-muted">(vous)</span>}
+                  </div>
+                  <div className="truncate text-xs text-muted">{m.email}</div>
+                </div>
+                {editable ? (
+                  <select className="h-9 shrink-0 rounded-full border border-line bg-card px-3 text-xs font-semibold" value={m.role} onChange={(e) => change(m.id, e.target.value === "__remove" ? null : e.target.value)}>
+                    {data.roles
+                      .filter((r) => r.assignable || r.id === m.role)
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label}
+                        </option>
+                      ))}
+                    <option value="__remove">Retirer de l'équipe</option>
+                  </select>
+                ) : (
+                  <span className={cx("shrink-0 rounded-full px-2.5 py-1 text-xs font-bold", m.role === "super_admin" ? "gold-gradient text-[#4a2c00]" : "bg-brand-soft text-brand dark:bg-brand/20 dark:text-white")}>{m.roleLabel}</span>
+                )}
+              </div>
+            );
+          })}
+          {data.invites.map((i) => (
+            <div key={i.id} className="flex items-center gap-3 border-t border-dashed border-line px-4 py-3">
+              <span className="grid size-10 place-items-center rounded-full bg-card-2 text-faint">
+                <UserPlus className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{i.label || "Invitation envoyée"}</span>
+                <span className="block text-xs text-muted">
+                  {roleOf(i.role)?.label} · en attente · {ago(i.createdAt)}
+                </span>
+              </span>
+              <button onClick={() => revoke(i.id)} className="h-8 rounded-full border border-line px-3 text-xs font-semibold">
+                Annuler
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 space-y-2 lg:mt-0">
+          {data.roles.map((r) => (
+            <div key={r.id} className={cx("rounded-2xl border p-3.5", r.id === data.me.role ? "border-brand/40 bg-brand-soft/60 dark:bg-brand/15" : "border-line bg-card")}>
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <ShieldCheck className="size-4 text-brand" /> {r.label}
+                {r.id === data.me.role && <span className="text-xs font-normal text-muted">· votre rôle</span>}
+              </div>
+              <div className="mt-0.5 text-xs text-muted">{r.description}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <InviteSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Inviter dans l'équipe ToBe"
+        roles={data.roles.map((r) => ({ id: r.id, label: r.label, description: r.description, disabled: !r.assignable }))}
+        create={(role, label) => api<InviteResult>("POST", "/team/invites", { role, label })}
+        onCreated={reload}
+      />
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
 import { COLLECTIONS, createDb, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
@@ -74,11 +75,14 @@ export async function runApi(
           dirty.delete(`${c}\u0000${id}`);
         },
       });
-      const svc = new ToBeService(db, serviceOptions(env));
+      // Clés des notifications push : créées au premier appel puis gardées dans la base.
+      const vapid = ensureVapid(db, env);
+      const svc = new ToBeService(db, { ...serviceOptions(env), push: { publicKey: vapid.publicKey, send: webPushSender(vapid) } });
       const result = handleApi(svc, full);
       if (!dirty.size && !removed.size) {
         await client.query("COMMIT");
         await Promise.all(svc.pending);
+        await dropGone(client, svc);
         return result;
       }
       if (!lock) {
@@ -98,6 +102,7 @@ export async function runApi(
       }
       await client.query("COMMIT");
       await Promise.all(svc.pending);
+      await dropGone(client, svc);
       return result;
     } catch (e) {
       await client.query("ROLLBACK").catch(() => {});
@@ -108,6 +113,12 @@ export async function runApi(
   };
   const first = await attempt(req.method !== "GET");
   return first ?? (await attempt(true))!;
+}
+
+/** Supprime les abonnements push qui n'existent plus (téléphone changé, notifications désactivées). */
+async function dropGone(client: PgClient, svc: ToBeService) {
+  if (!svc.goneSubs.length) return;
+  await client.query("DELETE FROM docs WHERE collection = 'pushSubs' AND id = ANY($1::text[])", [svc.goneSubs]).catch(() => {});
 }
 
 /** Vérifie un jeton de session sans charger toute la base (envoi d'images). */

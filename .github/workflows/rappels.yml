@@ -1,0 +1,14 @@
+# Envoie les rappels d'événements (2 jours avant, la veille, le jour J, 30 minutes avant).
+# Toutes les 5 minutes, GitHub appelle l'API ; chaque rappel n'est envoyé qu'une seule fois.
+name: Rappels ToBe
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+jobs:
+  rappels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Envoyer les rappels arrivés à échéance
+        run: curl -fsS -m 90 --retry 2 -X POST https://tobe.eledji.com/api/cron/reminders

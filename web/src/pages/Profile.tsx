@@ -1,6 +1,8 @@
-import { Bell, BriefcaseBusiness, ChevronRight, Crown, Download, LogOut, Moon, Pencil, RotateCcw, ScanFace, Sparkles, Store, Ticket, Trophy } from "lucide-react";
+import { Bell, BellRing, BriefcaseBusiness, ChevronRight, Crown, Download, LogOut, Moon, Pencil, RotateCcw, ScanFace, Sparkles, Store, Ticket, Trophy } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { askNotifications, openInstall } from "../components/AppPrompts";
+import { currentEndpoint, disablePush, isStandalone, pushState, type PushState } from "../lib/push";
 import { Button, Empty, ErrorState, Field, PageLoader, Sheet, Toggle, TopBar, inputCls } from "../components/ui";
 import { Avatar, Logo } from "../components/visual";
 import { api, isDemo } from "../lib/api";
@@ -8,19 +10,34 @@ import { ago, formatPhone, longDate } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
-type InstallEvt = Event & { prompt: () => Promise<void> };
 
 export function Profile() {
   const { me, ready, requireAuth, logout, theme, setTheme, refresh, toast } = useSession();
   const [edit, setEdit] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [install, setInstall] = useState<InstallEvt | null>(null);
+  const [push, setPush] = useState<PushState>(pushState());
+  const [pushBusy, setPushBusy] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
   useEffect(() => {
-    const h = (e: Event) => (e.preventDefault(), setInstall(e as InstallEvt));
-    window.addEventListener("beforeinstallprompt", h);
-    return () => window.removeEventListener("beforeinstallprompt", h);
+    const h = () => {
+      setPush(pushState());
+      currentEndpoint().then((e) => setSubscribed(!!e), () => setSubscribed(false));
+    };
+    h();
+    window.addEventListener("tobe-push-changed", h);
+    return () => window.removeEventListener("tobe-push-changed", h);
   }, []);
+  const pushOn = push === "granted" && subscribed;
+  const togglePush = async (on: boolean) => {
+    setPushBusy(true);
+    try {
+      if (on) await askNotifications();
+      else await disablePush();
+    } finally {
+      setPushBusy(false);
+    }
+  };
   if (!ready) return <PageLoader />;
 
   return (
@@ -77,9 +94,14 @@ export function Profile() {
         <Item to="/billets" icon={<Ticket />} label="Mes billets" />
         <Item to="/photos" icon={<ScanFace />} label="Mes photos et Pass ToBe" />
         {me && <Item to="/notifications" icon={<Bell />} label="Notifications" badge={me.unread} />}
-        <Item to="/organisateur" icon={<BriefcaseBusiness />} label="Espace organisateur" sub={me?.stats.organized ? `${me.stats.organized} événement(s)` : undefined} />
+        <Item
+          to="/organisateur"
+          icon={<BriefcaseBusiness />}
+          label="Espace organisateur"
+          sub={[me?.stats.organized ? `${me.stats.organized} événement(s)` : "", me?.eventRoles ? `membre de ${me.eventRoles} équipe(s)` : ""].filter(Boolean).join(" · ") || undefined}
+        />
         <Item to="/prestataires" icon={<Store />} label="Prestataires" />
-        {me?.user.role === "admin" && <Item to="/tobe" icon={<Sparkles />} label="Espace agence ToBe" sub="Demandes d'organisation, revenus" />}
+        {me?.team && <Item to="/tobe" icon={<Sparkles />} label="Espace agence ToBe" sub={me.team.label} />}
       </div>
 
       <div className="mx-5 mt-4 overflow-hidden rounded-[22px] border border-line bg-card">
@@ -90,12 +112,36 @@ export function Profile() {
           <span className="flex-1 font-medium">Mode sombre</span>
           <Toggle checked={theme === "dark"} onChange={(v) => setTheme(v ? "dark" : "light")} label="Mode sombre" />
         </div>
-        {install && (
-          <button onClick={() => install.prompt().then(() => setInstall(null))} className="flex w-full items-center gap-3 border-t border-line px-4 py-3.5 text-left">
+        <div className="flex items-center gap-3 border-t border-line px-4 py-3.5">
+          <span className="text-brand [&>svg]:size-5">
+            <BellRing />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Notifications sur ce téléphone</span>
+            <span className="block text-xs text-muted">
+              {pushOn ? "Rappels et nouvelles, comme vos messages" : push === "denied" ? "Bloquées dans les réglages du navigateur" : push === "ios-install" ? "Ajoutez d'abord ToBe à l'écran d'accueil" : push === "unsupported" ? "Non prises en charge par ce navigateur" : "Désactivées"}
+            </span>
+          </span>
+          <Toggle checked={pushOn} onChange={(v) => !pushBusy && togglePush(v)} label="Notifications" />
+        </div>
+        {pushOn && me && (
+          <button
+            onClick={() => api("POST", "/push/test").then(() => toast("Notification de test envoyée"), (e) => toast((e as Error).message, "error"))}
+            className="flex w-full items-center gap-3 border-t border-line px-4 py-3 text-left text-sm text-brand"
+          >
+            <span className="w-5" />
+            Envoyer une notification de test
+          </button>
+        )}
+        {!isStandalone() && (
+          <button onClick={openInstall} className="flex w-full items-center gap-3 border-t border-line px-4 py-3.5 text-left">
             <span className="text-brand [&>svg]:size-5">
               <Download />
             </span>
-            <span className="flex-1 font-medium">Installer l'application</span>
+            <span className="flex-1">
+              <span className="block font-medium">Installer l'application</span>
+              <span className="block text-xs text-muted">Sur l'écran d'accueil, sans passer par un store</span>
+            </span>
             <ChevronRight className="size-5 text-faint" />
           </button>
         )}

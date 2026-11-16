@@ -65,6 +65,8 @@ export const MISSIONS: MissionDef[] = [
   { id: "place", title: "Réserver sa première place", hint: "N'importe quel événement", points: 30, link: "/explorer", done: (u, _p, s) => s.db.orders.some((o) => o.userId === u.id && (o.status === "paid" || o.status === "reserved")) },
   { id: "vote", title: "Voter pour la première fois", hint: "Concours, élections, awards…", points: 20, link: "/explorer", done: (u, _p, s) => s.db.votes.some((v) => v.userId === u.id) },
   { id: "organiser", title: "Publier un événement", hint: "Public, et c'est parti", points: 100, link: "/creer", done: (u, _p, s) => s.db.events.some((e) => e.organizerId === u.id && e.visibility === "public") },
+  { id: "notifs", title: "Activer les notifications", hint: "Vos rappels comme vos messages", points: 30, link: "/profil", done: (u, _p, s) => s.db.pushSubs.some((x) => x.userId === u.id) },
+  { id: "app", title: "Installer l'application", hint: "ToBe sur votre écran d'accueil", points: 30, link: "/profil", done: (_u, p) => !!p.installedAt },
   { id: "parrain", title: "Inviter un ami", hint: "Il s'inscrit avec votre lien", points: 50, link: "/club#inviter", done: (_u, p) => p.referrals >= 1 },
   { id: "bande", title: "Faire venir 5 amis", hint: "La bande est au complet", points: 150, link: "/club#inviter", done: (_u, p) => p.referrals >= 5 },
   { id: "serie7", title: "7 jours d'affilée", hint: "Revenez chaque jour", points: 70, link: "/club", done: (_u, p) => p.bestStreak >= 7 },
@@ -333,8 +335,16 @@ export class Game {
       status: r.kind === "lot" ? "a-remettre" : "livre",
       createdAt: this.s.iso(),
     });
-    if (r.kind === "lot") for (const a of this.db.users.filter((x) => x.role === "admin")) this.s.notify(a.id, `Lot à remettre : ${r.title}`, `${u.name || u.email} · code ${redemption.code}`, "/admin");
+    if (r.kind === "lot") for (const a of this.db.users.filter((x) => this.s.team.can(x, "club.manage"))) this.s.notify(a.id, `Lot à remettre : ${r.title}`, `${u.name || u.email} · code ${redemption.code}`, "/admin");
     return { redemption, state: this.state(u.id) };
+  }
+
+  /** L'application signale qu'elle est ouverte en mode installé (écran d'accueil). */
+  markInstalled(userId: string) {
+    const u = this.s.requireUser(userId);
+    const p = this.player(u.id);
+    if (!p.installedAt) this.db.players.update(u.id, { installedAt: this.s.iso() });
+    return { ok: true };
   }
 
   /** Utiliser un crédit de boost gagné au ToBe Club. */
@@ -344,7 +354,7 @@ export class Game {
     if (p.boostCredits <= 0) throw new ApiError(400, "Aucun boost offert disponible. Gagnez-en au ToBe Club !");
     const e = this.s.db.events.get(eventId) ?? this.s.db.events.find((x) => x.slug === eventId);
     if (!e) throw new ApiError(404, "Événement introuvable");
-    if (e.organizerId !== u.id && u.role !== "admin") throw new ApiError(403, "Réservé à l'organisateur");
+    if (!this.s.team.access(e, u).edit) throw new ApiError(403, "Réservé à l'organisateur");
     const now = this.s.now();
     const base = e.boostedUntil && new Date(e.boostedUntil) > now ? new Date(e.boostedUntil) : now;
     const boostedUntil = new Date(base.getTime() + 72 * 3600_000).toISOString();
@@ -355,9 +365,7 @@ export class Game {
 
   // ---------- Espace agence ----------
   private requireAdmin(userId: string) {
-    const u = this.s.requireUser(userId);
-    if (u.role !== "admin") throw new ApiError(403, "Réservé à l'équipe ToBe");
-    return u;
+    return this.s.team.require(userId, "club.manage");
   }
 
   adminView(userId: string) {

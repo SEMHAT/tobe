@@ -4,12 +4,14 @@ import path from "node:path";
 import cors from "cors";
 import express, { type Request } from "express";
 import { handleApi, preVerify, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
+import { ensureVapid, webPushSender } from "@tobe/core/src/node/webpush";
 import { config } from "./config";
 
 export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   const cfg = { ...config, ...opts };
   if (cfg.seed) seedDb(db);
-  const svc = new ToBeService(db, { exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
+  const vapid = ensureVapid(db, process.env);
+  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
 
   const app = express();
   app.disable("x-powered-by");
@@ -59,6 +61,9 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
       verified: pre.verified,
     });
     const pending = svc.pending.splice(0);
+    void Promise.all(pending).then(() => {
+      for (const id of svc.goneSubs.splice(0)) if (db.pushSubs.get(id)) db.pushSubs.remove(id);
+    });
     Promise.all(pending).finally(() => res.status(r.status).json(r.body));
   });
 

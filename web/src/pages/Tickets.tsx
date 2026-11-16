@@ -1,3 +1,5 @@
+import { askNotifications, openInstall } from "../components/AppPrompts";
+import { isStandalone, pushState } from "../lib/push";
 import type { EventCard, Order } from "@tobe/core";
 import { CheckCircle2, ChevronRight, MapPin, Ticket as TicketIcon, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -91,6 +93,18 @@ export function TicketPage() {
   });
   const { data, error, loading } = useLoad(() => api<MyTicket>("GET", `/tickets/${id}`), [id]);
   const t = data ?? cached;
+  // Billet tout juste pris : on propose d'activer les rappels sur le téléphone, puis d'installer l'application.
+  useEffect(() => {
+    if (!fresh) return;
+    const t = window.setTimeout(async () => {
+      const state = pushState();
+      if (state === "default" || state === "ios-install") {
+        const ok = await askNotifications("Votre billet est réservé ! Recevez un rappel 2 jours avant, la veille, le jour J et 30 minutes avant l'événement.");
+        if (ok) window.dispatchEvent(new CustomEvent("tobe-toast", { detail: "Rappels activés sur ce téléphone" }));
+      } else if (!isStandalone()) openInstall();
+    }, 1800);
+    return () => clearTimeout(t);
+  }, [fresh]);
   useEffect(() => {
     if (data) {
       const raw = localStorage.getItem(CACHE);

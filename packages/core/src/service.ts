@@ -1,5 +1,7 @@
 import type { Db } from "./db.js";
 import { Game } from "./game.js";
+import { Team, TEAM_ROLES } from "./team.js";
+import { Reminders, type PushPayload, type PushSender } from "./reminders.js";
 import type { GoogleProfile } from "./google.js";
 import {
   FACE_CONSISTENCY_MAX,
@@ -25,6 +27,7 @@ import {
   type Impact,
 } from "./rules.js";
 import type {
+  PushSub,
   Access,
   Cagnotte,
   Candidate,
@@ -61,6 +64,8 @@ export interface ServiceOptions {
   googleClientId?: string | null;
   /** Envoi du code de connexion par e-mail. */
   sendCode?: (email: string, code: string) => Promise<void> | void;
+  /** Notifications push (Web Push) : clé publique VAPID et fonction d'envoi. */
+  push?: { publicKey: string; send: PushSender } | null;
 }
 
 // ---------- Vues renvoyées à l'interface ----------
@@ -96,6 +101,12 @@ export interface EventView extends Omit<TobeEvent, "accessCode" | "invitees"> {
   photoCount: number;
   myTickets: number;
   organizerPro: boolean;
+  /** Rôle de l'utilisateur sur cet événement (organisateur, équipe ToBe, co-organisateur, contrôleur, photographe). */
+  myRole: "owner" | "staff" | "co_organisateur" | "controleur" | "photographe" | null;
+  canScan: boolean;
+  canPhotos: boolean;
+  /** L'utilisateur a demandé un rappel. */
+  following: boolean;
 }
 
 export interface CandidateView extends Candidate {
@@ -152,9 +163,15 @@ export interface CreateEventInput {
 const DAY = 86_400_000;
 
 export class ToBeService {
-  private opts: Required<Omit<ServiceOptions, "sendCode" | "googleClientId">> & Pick<ServiceOptions, "sendCode" | "googleClientId">;
+  private opts: Required<Omit<ServiceOptions, "sendCode" | "googleClientId" | "push">> & Pick<ServiceOptions, "sendCode" | "googleClientId" | "push">;
   /** ToBe Club : jeu, points et récompenses. */
   readonly game: Game;
+  /** Rôles : équipe d'un événement et équipe ToBe. */
+  readonly team: Team;
+  /** Rappels d'événements et notifications push. */
+  readonly reminders: Reminders;
+  /** Abonnements push qui n'existent plus (à supprimer après la requête). */
+  goneSubs: string[] = [];
   /** Tâches asynchrones à attendre avant de répondre (envoi d'e-mails). */
   pending: Promise<unknown>[] = [];
 
@@ -170,8 +187,34 @@ export class ToBeService {
       paymentsEnabled: options.paymentsEnabled ?? false,
       sendCode: options.sendCode,
       googleClientId: options.googleClientId ?? null,
+      push: options.push ?? null,
     };
     this.game = new Game(this);
+    this.team = new Team(this);
+    this.reminders = new Reminders(this);
+  }
+
+  /** Envoie une notification push (sans bloquer : elle part juste après la réponse). */
+  sendPush(sub: PushSub, payload: PushPayload) {
+    const push = this.opts.push;
+    if (!push) return;
+    this.pending.push(
+      push
+        .send(sub, payload)
+        .then((r) => {
+          if (r === "gone") this.goneSubs.push(sub.id);
+        })
+        .catch((e) => console.error("[push] échec", e)),
+    );
+  }
+
+  findEventPublic(idOrSlug: string): TobeEvent {
+    return this.findEvent(idOrSlug);
+  }
+
+  /** E-mails des super administrateurs fixés par la configuration du serveur. */
+  get adminEmails(): string[] {
+    return this.opts.adminEmails;
   }
 
   now(): Date {
@@ -188,7 +231,7 @@ export class ToBeService {
   // Authentification par code envoyé par e-mail
   // =====================================================================
   config() {
-    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo, googleClientId: this.opts.googleClientId || null };
+    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo, googleClientId: this.opts.googleClientId || null, vapidPublicKey: this.opts.push?.publicKey ?? null };
   }
 
   requestOtp(rawEmail: string): { sent: true; email: string; devCode?: string } {
@@ -294,6 +337,11 @@ export class ToBeService {
       user: this.publicUser(u),
       stats: { events: events.size, tickets: orders.reduce((s, o) => s + o.qty, 0), votes, photos, organized: this.db.events.filter((e) => e.organizerId === u.id).length },
       unread,
+      team: (() => {
+        const r = this.team.teamRole(u);
+        return r ? { role: r, label: TEAM_ROLES[r].label, perms: TEAM_ROLES[r].perms } : null;
+      })(),
+      eventRoles: this.db.members.filter((m) => m.userId === u.id).length,
       premium: !!u.premiumUntil && new Date(u.premiumUntil) > this.now(),
     };
   }
@@ -429,13 +477,17 @@ export class ToBeService {
     return e;
   }
 
+  /** Droit de modifier l'événement (organisateur, co-organisateur, équipe ToBe habilitée). */
   private canManage(e: TobeEvent, user: User | null): boolean {
-    return !!user && (user.id === e.organizerId || user.role === "admin");
+    return this.team.access(e, user).edit;
   }
 
   private canView(e: TobeEvent, user: User | null, code?: string | null): boolean {
     if (e.visibility !== "private") return true;
     if (user && user.id === e.organizerId) return true; // l'équipe ToBe (admin) n'a pas d'accès automatique aux événements privés
+    // L'équipe de l'événement (invitée par l'organisateur) et le chef de projet ToBe en charge y ont accès.
+    if (user && this.db.members.some((m) => m.eventId === e.id && m.userId === user.id)) return true;
+    if (user && e.tobeRequestId && this.db.tobeRequests.get(e.tobeRequestId)?.assignedTo === user.id) return true;
     if (code && e.accessCode && code.trim().toUpperCase() === e.accessCode.toUpperCase()) return true;
     if (!user) return false;
     if (e.invitees.includes(user.email)) return true;
@@ -452,19 +504,24 @@ export class ToBeService {
         theme: e.theme,
       });
     }
-    const manage = this.canManage(e, user);
+    const acc = this.team.access(e, user);
+    const manage = acc.edit;
     // Un invité connecté qui saisit le bon code est ajouté à la liste : il n'aura plus à le retaper.
     if (user && e.visibility === "private" && code && !e.invitees.includes(user.email) && user.id !== e.organizerId && e.accessCode && code.trim().toUpperCase() === e.accessCode.toUpperCase()) {
       this.db.events.update(e.id, { invitees: [...e.invitees, user.email] });
     }
     const fresh = this.db.events.get(e.id)!;
-    const ev = manage ? fresh : this.db.events.update(e.id, { views: fresh.views + 1 });
+    const ev = acc.role ? fresh : this.db.events.update(e.id, { views: fresh.views + 1 });
     const { accessCode, invitees, ...rest } = ev;
     return {
       ...rest,
       ...(manage ? { accessCode, invitees } : {}),
       impact: computeImpact(ev),
       isOrganizer: manage,
+      myRole: acc.role,
+      canScan: acc.scan,
+      canPhotos: acc.photos,
+      following: user ? this.db.reminders.some((r) => r.eventId === ev.id && r.userId === user.id) : false,
       attendees: this.attendees(ev),
       photoCount: this.db.photos.filter((p) => p.eventId === ev.id).length,
       organizerPro: !!this.db.users.get(ev.organizerId)?.pro,
@@ -575,7 +632,7 @@ export class ToBeService {
   deleteEvent(userId: string, idOrSlug: string) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
-    if (!this.canManage(e, user)) throw new ApiError(403, "Seul l'organisateur peut supprimer cet événement");
+    if (!this.team.access(e, user).delete) throw new ApiError(403, "Seul l'organisateur peut supprimer cet événement");
     if (this.attendees(e) > 0) throw new ApiError(400, "Des billets ont été vendus : contactez ToBe pour annuler et rembourser");
     this.db.events.remove(e.id);
     return { ok: true };
@@ -634,6 +691,8 @@ export class ToBeService {
     this.db.orders.insert(order);
     this.db.events.update(e.id, (ev) => ({ ...ev, ticketTypes: ev.ticketTypes.map((t) => (t.id === tt.id ? { ...t, sold: t.sold + qty } : t)) }));
     if (online && total > 0) this.pay(user.id, "ticket", order.id, e.id, total, fee, input.method);
+    // Billet pris : rappels automatiques 2 jours avant, la veille, le jour J et 30 minutes avant.
+    this.reminders.add(e, { userId: user.id, subId: null }, "ticket");
     return order;
   }
 
@@ -662,7 +721,7 @@ export class ToBeService {
     const o = this.db.orders.find((x) => x.code === code);
     if (!o) return { ok: false as const, reason: "Billet inconnu" };
     const e = this.db.events.get(o.eventId);
-    if (!e || !this.canManage(e, user)) return { ok: false as const, reason: "Ce billet n'est pas pour vos événements" };
+    if (!e || !this.team.access(e, user).scan) return { ok: false as const, reason: "Ce billet n'est pas pour vos événements" };
     if (eventId && e.id !== eventId) return { ok: false as const, reason: `Billet pour un autre événement : ${e.title}` };
     if (o.scannedCount >= o.qty) return { ok: false as const, reason: "Billet déjà utilisé", order: o };
     const next = this.db.orders.update(o.id, { scannedCount: o.scannedCount + 1 });
@@ -872,7 +931,7 @@ export class ToBeService {
   addPhotos(userId: string, idOrSlug: string, photos: { url: string; width: number; height: number; faces: number[][] }[]) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
-    if (!this.canManage(e, user)) throw new ApiError(403, "Seul l'organisateur peut déposer des photos");
+    if (!this.team.access(e, user).photos) throw new ApiError(403, "Seuls l'organisateur et ses photographes peuvent déposer des photos");
     const added: Photo[] = photos.map((p) =>
       this.db.photos.insert({ id: newId("pho"), eventId: e.id, url: p.url, width: p.width, height: p.height, faces: (p.faces ?? []).filter((f) => Array.isArray(f) && f.length === 128), uploadedBy: user.id, createdAt: this.iso() }),
     );
@@ -898,7 +957,7 @@ export class ToBeService {
     if (!p) throw new ApiError(404, "Photo introuvable");
     const e = this.db.events.get(p.eventId);
     const isMe = facesMatch(userFaces(user), p.faces);
-    if (!(e && this.canManage(e, user)) && !isMe) throw new ApiError(403, "Vous ne pouvez retirer que vos propres photos");
+    if (!(e && this.team.access(e, user).photos) && !this.team.can(user, "photos.moderate") && !isMe) throw new ApiError(403, "Vous ne pouvez retirer que vos propres photos");
     this.db.photos.remove(p.id);
     return { ok: true };
   }
@@ -963,8 +1022,11 @@ export class ToBeService {
   // =====================================================================
   // Notifications
   // =====================================================================
-  notify(userId: string, title: string, body: string, link: string): Notification {
-    return this.db.notifications.insert({ id: newId("ntf"), userId, title, body, link, read: false, createdAt: this.iso() });
+  /** Notification dans l'application, et aussi sur le téléphone (push) si la personne les a activées. */
+  notify(userId: string, title: string, body: string, link: string, push?: PushPayload): Notification {
+    const n = this.db.notifications.insert({ id: newId("ntf"), userId, title, body, link, read: false, createdAt: this.iso() });
+    this.reminders.pushToUser(userId, push ?? { title, body, url: link, tag: n.id });
+    return n;
   }
 
   notifications(userId: string) {
@@ -1014,8 +1076,11 @@ export class ToBeService {
 
   organizerDashboard(userId: string) {
     const user = this.requireUser(userId);
-    const events = this.db.events.filter((e) => e.organizerId === user.id).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+    const memberOf = new Set(this.db.members.filter((m) => m.userId === user.id).map((m) => m.eventId));
+    const assigned = new Set(this.db.tobeRequests.filter((r) => r.assignedTo === user.id && !!r.eventId).map((r) => r.eventId!));
+    const events = this.db.events.filter((e) => e.organizerId === user.id || memberOf.has(e.id) || assigned.has(e.id)).sort((a, b) => b.startsAt.localeCompare(a.startsAt));
     const rows = events.map((e) => {
+      const acc = this.team.access(e, user);
       const orders = this.db.orders.filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved"));
       const sold = orders.reduce((s, o) => s + o.qty, 0);
       const ticketRevenue = orders.reduce((s, o) => s + o.unitPrice * o.qty, 0);
@@ -1044,10 +1109,14 @@ export class ToBeService {
         tobeRequest: e.tobeRequestId ? this.db.tobeRequests.get(e.tobeRequestId)?.status ?? null : null,
         contestId: e.contestId,
         cagnotteId: e.cagnotteId,
-        accessCode: e.accessCode,
+        accessCode: acc.edit ? e.accessCode : null,
+        myRole: acc.role,
+        access: acc,
       };
-    });
-    const totals = rows.reduce(
+    })
+    // Les membres sans accès aux chiffres (contrôleur, photographe) ne voient pas les montants.
+    .map((r) => (r.access.stats ? r : { ...r, ticketRevenue: 0, voteRevenue: 0, cagnotte: null, salesByDay: [] }));
+    const totals = rows.filter((r) => r.myRole === "owner").reduce(
       (t, r) => ({ sold: t.sold + r.sold, revenue: t.revenue + r.ticketRevenue + r.voteRevenue + (r.cagnotte?.net ?? 0), views: t.views + r.views, votes: t.votes + r.votes }),
       { sold: 0, revenue: 0, views: 0, votes: 0 },
     );
@@ -1093,7 +1162,7 @@ export class ToBeService {
     const p = existing
       ? this.db.providers.update(existing.id, { ...data, status: existing.status === "approved" ? "approved" : "pending" })
       : this.db.providers.insert({ id: newId("prv"), ownerId: user.id, status: "pending", rating: 0, reviews: 0, certified: false, theme: "nuit", ...data });
-    if (!existing) for (const a of this.db.users.filter((u) => u.role === "admin" && u.id !== user.id)) this.notify(a.id, "Nouveau prestataire à valider", p.name, "/tobe");
+    if (!existing) for (const a of this.db.users.filter((u) => this.team.can(u, "providers.moderate") && u.id !== user.id)) this.notify(a.id, "Nouveau prestataire à valider", p.name, "/tobe");
     return p;
   }
 
@@ -1103,7 +1172,7 @@ export class ToBeService {
   }
 
   setProviderStatus(userId: string, id: string, patch: { status?: Provider["status"]; certified?: boolean }) {
-    this.requireAdmin(userId);
+    this.requireAdmin(userId, "providers.moderate");
     const p = this.db.providers.get(id);
     if (!p) throw new ApiError(404, "Prestataire introuvable");
     const next = this.db.providers.update(id, { status: patch.status ?? p.status, certified: patch.certified ?? p.certified });
@@ -1156,7 +1225,7 @@ export class ToBeService {
       createdAt: this.iso(),
     });
     if (e) this.db.events.update(e.id, { tobeRequestId: req.id });
-    for (const a of this.db.users.filter((u) => u.role === "admin" && u.id !== user.id)) {
+    for (const a of this.db.users.filter((u) => this.team.can(u, "requests.all") && u.id !== user.id)) {
       this.notify(a.id, "Nouvelle demande d'organisation", `${user.name || user.email} — ${req.eventTitle || "projet"}`, "/tobe");
     }
     return req;
@@ -1165,18 +1234,24 @@ export class ToBeService {
   // =====================================================================
   // Espace ToBe (agence)
   // =====================================================================
-  private requireAdmin(userId: string) {
-    const u = this.requireUser(userId);
-    if (u.role !== "admin") throw new ApiError(403, "Espace réservé à l'équipe ToBe");
-    return u;
+  private requireAdmin(userId: string, perm?: Parameters<Team["require"]>[1]) {
+    return this.team.require(userId, perm);
   }
 
   adminOverview(userId: string) {
-    this.requireAdmin(userId);
-    const requests = this.db.tobeRequests.all().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((r) => {
-      const e = r.eventId ? this.db.events.get(r.eventId) : null;
-      return { ...r, event: e ? this.toCard(e) : null };
-    });
+    const me = this.requireAdmin(userId);
+    const role = this.team.teamRole(me)!;
+    const seeAll = this.team.can(me, "requests.all") || role === "support";
+    const mine = this.team.can(me, "requests.mine");
+    const requests = this.db.tobeRequests
+      .filter((r) => seeAll || (mine && (!r.assignedTo || r.assignedTo === me.id)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((r) => {
+        const e = r.eventId ? this.db.events.get(r.eventId) : null;
+        const a = r.assignedTo ? this.db.users.get(r.assignedTo) : null;
+        return { ...r, event: e ? this.toCard(e) : null, assignee: a ? { id: a.id, name: a.name || a.email } : null };
+      });
+    const projectManagers = this.db.users.filter((u) => this.team.can(u, "requests.mine")).map((u) => ({ id: u.id, name: u.name || u.email, role: this.team.teamRole(u) }));
     const revenue: Record<string, { amount: number; platform: number; count: number }> = {};
     for (const p of this.db.payments.all()) {
       revenue[p.kind] ??= { amount: 0, platform: 0, count: 0 };
@@ -1186,8 +1261,10 @@ export class ToBeService {
     }
     const providers = this.db.providers.all().sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1) || a.name.localeCompare(b.name));
     return {
+      me: { id: me.id, role, label: TEAM_ROLES[role].label, perms: TEAM_ROLES[role].perms },
+      projectManagers,
       requests,
-      providers,
+      providers: this.team.can(me, "providers.moderate") || this.team.can(me, "stats.view") ? providers : [],
       revenue,
       platformTotal: Object.values(revenue).reduce((s, r) => s + r.platform, 0),
       counts: {
@@ -1203,8 +1280,10 @@ export class ToBeService {
   }
 
   updateTobeRequest(userId: string, id: string, status: TobeRequest["status"]) {
-    this.requireAdmin(userId);
-    if (!this.db.tobeRequests.get(id)) throw new ApiError(404, "Demande introuvable");
+    const me = this.requireAdmin(userId);
+    const r = this.db.tobeRequests.get(id);
+    if (!r) throw new ApiError(404, "Demande introuvable");
+    if (!this.team.can(me, "requests.all") && !(this.team.can(me, "requests.mine") && r.assignedTo === me.id)) throw new ApiError(403, "Prenez d'abord ce dossier en charge");
     return this.db.tobeRequests.update(id, { status });
   }
 }

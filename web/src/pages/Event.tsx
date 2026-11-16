@@ -12,10 +12,15 @@ import {
   Radio,
   Settings2,
   Share2,
+  Bell,
+  BellRing,
+  Check,
   Ticket,
   Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { askNotifications } from "../components/AppPrompts";
+import { currentEndpoint, pushState } from "../lib/push";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EventMap } from "../components/Map";
 import { Button, Card, ErrorState, IconButton, PageLoader, Progress, TopBar, cx, inputCls } from "../components/ui";
@@ -123,6 +128,8 @@ export function EventPage() {
           <InfoRow icon={<Users className="size-5" />} title={e.attendees ? `${compact(e.attendees)} participant${e.attendees > 1 ? "s" : ""}` : "Soyez parmi les premiers"} sub={`${compact(e.expectedAttendance)} attendus`} />
         </div>
 
+        {!ended && <RemindCard e={e} />}
+
         <div className="mt-5 flex items-center gap-3 rounded-2xl border border-line bg-card p-3">
           <Avatar name={e.organizerName} size={42} />
           <div className="min-w-0 flex-1">
@@ -224,6 +231,94 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
       <Button full size="lg" icon={<Ticket className="size-5" />} onClick={() => nav(`/evenement/${e.slug}/billets`)}>
         {e.access === "paid" ? "Prendre mon billet" : e.access === "invite" ? "Confirmer ma présence" : "Réserver ma place"}
       </Button>
+    </div>
+  );
+}
+
+// ---------- Rappels : 2 jours avant, la veille, le jour J, 30 minutes avant ----------
+const STAGE_LABELS: Record<string, string> = { j2: "2 jours avant", veille: "La veille", jourj: "Le jour J", bientot: "30 min avant" };
+
+function useReminder(e: EventView) {
+  const { me, toast } = useSession();
+  const [following, setFollowing] = useState(e.following || e.myTickets > 0);
+  const [schedule, setSchedule] = useState<{ stage: string; at: string; past: boolean }[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [pushOn, setPushOn] = useState(pushState() === "granted");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const endpoint = await currentEndpoint().catch(() => null);
+      const r = await api<{ following: boolean; schedule: typeof schedule }>("GET", `/events/${e.id}/remind`, undefined, { endpoint: endpoint ?? undefined }).catch(() => null);
+      if (!alive || !r) return;
+      setSchedule(r.schedule);
+      if (r.following) setFollowing(true);
+    })();
+    const h = () => setPushOn(pushState() === "granted");
+    window.addEventListener("tobe-push-changed", h);
+    return () => {
+      alive = false;
+      window.removeEventListener("tobe-push-changed", h);
+    };
+  }, [e.id, me?.user.id]);
+
+  const toggle = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (following && e.myTickets === 0 && pushOn) {
+        await api("POST", `/events/${e.id}/unremind`, { endpoint: await currentEndpoint() });
+        setFollowing(false);
+        toast("Rappels désactivés pour cet événement");
+      } else {
+        // Les notifications d'abord : c'est par là que partent les rappels.
+        const ok = pushState() === "granted" || (await askNotifications(`On vous prévient 2 jours avant « ${e.title} », la veille, le jour J et 30 minutes avant.`));
+        setPushOn(pushState() === "granted");
+        const endpoint = await currentEndpoint();
+        if (!ok && !me) {
+          setBusy(false);
+          return;
+        }
+        const r = await api<{ schedule: typeof schedule }>("POST", `/events/${e.id}/remind`, { endpoint });
+        setSchedule(r.schedule);
+        setFollowing(true);
+        toast(ok ? "C'est noté : on vous rappelle l'événement" : "Rappel enregistré dans vos notifications ToBe");
+      }
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
+    setBusy(false);
+  };
+  return { following, schedule, busy, toggle, pushOn };
+}
+
+function RemindCard({ e }: { e: EventView }) {
+  const r = useReminder(e);
+  const ticket = e.myTickets > 0;
+  return (
+    <div className={cx("mt-5 rounded-2xl border p-4 transition", r.following ? "border-brand/30 bg-brand-soft/60 dark:bg-brand/15" : "border-line bg-card")}>
+      <div className="flex items-center gap-3">
+        <span className={cx("grid size-11 shrink-0 place-items-center rounded-2xl", r.following ? "brand-gradient text-white" : "bg-card-2 text-brand")}>
+          {r.following ? <BellRing className="size-5" /> : <Bell className="size-5" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">{r.following ? (ticket ? "Rappels de votre billet activés" : "Rappels activés") : "Ne ratez pas cet événement"}</div>
+          <div className="text-sm text-muted">{r.following ? (r.pushOn ? "Sur ce téléphone, comme vos messages." : "Dans vos notifications ToBe. Activez-les sur ce téléphone pour être alerté.") : "On vous prévient 2 jours avant, la veille, le jour J et 30 minutes avant."}</div>
+        </div>
+        {!(ticket && r.pushOn) && (
+          <Button size="sm" variant={r.following && r.pushOn ? "outline" : "gold"} loading={r.busy} onClick={r.toggle} className="shrink-0">
+            {r.following ? (r.pushOn ? "Retirer" : "Activer") : "Me rappeler"}
+          </Button>
+        )}
+      </div>
+      {r.following && r.schedule.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {r.schedule.map((s) => (
+            <span key={s.stage} className={cx("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold", s.past ? "bg-card-2 text-faint line-through" : "bg-white text-brand dark:bg-white/10 dark:text-white")}>
+              {!s.past && <Check className="size-3" />} {STAGE_LABELS[s.stage]}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

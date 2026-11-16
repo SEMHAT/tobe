@@ -1,6 +1,7 @@
 import { CheckCircle2, AlertCircle, Mail } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Field, Sheet, inputCls } from "../components/ui";
+import { isStandalone, syncPush } from "./push";
 import { api, getToken, isDemo, setToken } from "./api";
 
 export interface Me {
@@ -21,6 +22,10 @@ export interface Me {
   stats: { events: number; tickets: number; votes: number; photos: number; organized: number };
   unread: number;
   premium: boolean;
+  /** Rôle dans l'équipe ToBe (agence), sinon null. */
+  team: { role: string; label: string; perms: string[] } | null;
+  /** Nombre d'événements où l'on fait partie de l'équipe (contrôleur, photographe…). */
+  eventRoles: number;
 }
 
 interface Ctx {
@@ -67,6 +72,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     try {
       setMe(await api<Me>("GET", "/me"));
+      // Notifications déjà activées sur ce téléphone : on les rattache au compte.
+      void syncPush();
+      // Ouverte depuis l'écran d'accueil : mission « Installer l'application » du Club.
+      if (isStandalone() && !sessionStorage.getItem("tobe-installed-sent")) {
+        sessionStorage.setItem("tobe-installed-sent", "1");
+        api("POST", "/game/installed").catch(() => {});
+      }
       // Parrainage : lien partagé par un ami (?ref=CODE), appliqué une seule fois après la connexion.
       const ref = localStorage.getItem("tobe-ref");
       if (ref) {

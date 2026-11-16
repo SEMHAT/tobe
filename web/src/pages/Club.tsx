@@ -1,5 +1,7 @@
 import {
   Award,
+  BellRing,
+  Smartphone,
   Brain,
   CalendarCheck,
   Check,
@@ -120,7 +122,7 @@ export interface GameState {
 
 const LEVEL_ICONS: Record<string, typeof Star> = { sparkles: Sparkles, ticket: Ticket, music: Music, star: Star, crown: Crown };
 const REWARD_ICONS: Record<Reward["kind"], typeof Gift> = { badge: Award, boost: Rocket, premium: Gem, lot: Gift };
-const MISSION_ICONS: Record<string, typeof Gift> = { profil: Users, pass: ScanFace, place: Ticket, vote: Trophy, organiser: PartyPopper, parrain: UserPlus, bande: Users, serie7: Flame };
+const MISSION_ICONS: Record<string, typeof Gift> = { notifs: BellRing, app: Smartphone,  profil: Users, pass: ScanFace, place: Ticket, vote: Trophy, organiser: PartyPopper, parrain: UserPlus, bande: Users, serie7: Flame };
 const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
 
 // ---------- Petits effets ----------

@@ -1,6 +1,7 @@
 import { Bell, Compass, Home, Plus, ScanFace, Search, Trophy, User } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { InstallPrompt, NotifyPrompt } from "./AppPrompts";
 import { useRouteRobots } from "../lib/seo";
 import { SessionProvider, useSession } from "../lib/session";
 import { cx } from "./ui";
@@ -59,7 +60,7 @@ function DesktopNav() {
           </NavLink>
           {link("/prestataires", "Prestataires")}
           {me && link("/organisateur", "Organisateur")}
-          {me?.user.role === "admin" && link("/tobe", "Agence")}
+          {me?.team && link("/tobe", "Agence")}
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <button onClick={() => nav("/explorer")} aria-label="Rechercher" className="grid size-10 place-items-center rounded-full border border-line hover:border-ink/30">
@@ -152,6 +153,8 @@ function Frame() {
         <Footer />
       </div>
       {showTabs && <BottomNav />}
+      <InstallPrompt />
+      <NotifyPrompt />
     </div>
   );
 }

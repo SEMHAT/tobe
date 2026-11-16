@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./styles.css";
+// Chargé tout de suite : capte l'événement d'installation (PWA) avant qu'il ne se perde.
+import "./lib/push";
 
 // Lien de parrainage : https://tobe.eledji.com/?ref=CODE
 try {
@@ -20,3 +22,8 @@ createRoot(document.getElementById("root")!).render(
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {}));
 }
+
+// L'application est ouverte : on efface la pastille de notifications sur l'icône.
+const clearBadge = () => (navigator as unknown as { clearAppBadge?: () => Promise<void> }).clearAppBadge?.().catch(() => {});
+clearBadge();
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && clearBadge());

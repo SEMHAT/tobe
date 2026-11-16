@@ -3,7 +3,12 @@ import type {
   Contest,
   Contribution,
   Notification,
+  EventMember,
+  Invite,
   LedgerEntry,
+  PushSub,
+  Reminder,
+  Setting,
   Order,
   Otp,
   Player,
@@ -103,6 +108,11 @@ export const COLLECTIONS = [
   "ledger",
   "rewards",
   "redemptions",
+  "members",
+  "invites",
+  "pushSubs",
+  "reminders",
+  "settings",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
@@ -127,6 +137,11 @@ export interface Db {
   ledger: Collection<LedgerEntry>;
   rewards: Collection<Reward>;
   redemptions: Collection<Redemption>;
+  members: Collection<EventMember>;
+  invites: Collection<Invite>;
+  pushSubs: Collection<PushSub>;
+  reminders: Collection<Reminder>;
+  settings: Collection<Setting>;
 }
 
 export type DbSnapshot = { [K in CollectionName]?: { id: string }[] };

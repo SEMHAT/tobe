@@ -16,6 +16,7 @@ import { Providers } from "./pages/Providers";
 import { TobeAdmin } from "./pages/Admin";
 import { NotFound } from "./pages/NotFound";
 import { Club } from "./pages/Club";
+import { Invitation } from "./pages/Invitation";
 import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
@@ -50,6 +51,7 @@ export function App() {
           <Route path="/prestataires" element={<Providers />} />
           <Route path="/tobe" element={<TobeAdmin />} />
           <Route path="/club" element={<Club />} />
+          <Route path="/invitation/:token" element={<Invitation />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

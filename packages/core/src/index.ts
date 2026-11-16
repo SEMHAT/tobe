@@ -9,3 +9,5 @@ export * from "./errors.js";
 export * from "./google.js";
 export * from "./game.js";
 export * from "./quiz.js";
+export * from "./team.js";
+export * from "./reminders.js";

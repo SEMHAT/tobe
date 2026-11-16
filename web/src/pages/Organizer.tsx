@@ -25,6 +25,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { eventPath } from "../components/events";
+import { EventTeam } from "../components/TeamInvite";
 import { PayPicker } from "../components/pay";
 import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
 import { Poster, TierBadge } from "../components/visual";
@@ -52,7 +53,11 @@ interface Row {
   contestId: string | null;
   cagnotteId: string | null;
   accessCode: string | null;
+  myRole: "owner" | "staff" | "co_organisateur" | "controleur" | "photographe" | null;
+  access: { edit: boolean; scan: boolean; photos: boolean; stats: boolean; members: boolean; delete: boolean };
 }
+
+const ROLE_LABELS: Record<string, string> = { staff: "Équipe ToBe", co_organisateur: "Co-organisateur", controleur: "Contrôleur d'entrée", photographe: "Photographe" };
 interface Dashboard {
   events: Row[];
   totals: { sold: number; revenue: number; views: number; votes: number };
@@ -79,18 +84,23 @@ export function Organizer() {
       {error && <ErrorState message={error.message} onRetry={reload} />}
       {data && (
         <>
-          <div className="grid grid-cols-2 gap-3 px-5 pt-4 lg:grid-cols-4 lg:px-0">
+          {(data.events.length === 0 || data.events.some((r) => r.myRole === "owner")) && <div className="grid grid-cols-2 gap-3 px-5 pt-4 lg:grid-cols-4 lg:px-0">
             <Stat label="Recettes nettes" value={formatFcfa(data.totals.revenue)} />
             <Stat label="Billets" value={compact(data.totals.sold)} />
             <Stat label="Vues" value={compact(data.totals.views)} />
             <Stat label="Votes" value={compact(data.totals.votes)} />
-          </div>
+          </div>}
           {data.events.length === 0 ? (
             <Empty icon={<Sparkles className="size-7" />} title="Aucun événement" text="Publiez votre premier événement en 2 minutes." action={<Link to="/creer"><Button>Créer un événement</Button></Link>} />
           ) : (
             <div className="space-y-3 px-5 pt-6 lg:grid lg:grid-cols-2 lg:gap-5 lg:space-y-0 lg:px-0">
-              <h2 className="text-lg font-bold lg:col-span-2">Mes événements</h2>
-              {data.events.map((r) => (
+              {(["mine", "team"] as const).map((group) => {
+                const list = data.events.filter((r) => (group === "mine" ? r.myRole === "owner" : r.myRole !== "owner"));
+                if (!list.length) return null;
+                return (
+                  <div key={group} className="contents">
+              <h2 className="pt-2 text-lg font-bold lg:col-span-2">{group === "mine" ? "Mes événements" : "Mes missions d'équipe"}</h2>
+              {list.map((r) => (
                 <Link key={r.event.id} to={`/organisateur/${r.event.id}`} className="block rounded-[20px] border border-line bg-card p-3">
                   <div className="flex items-center gap-3">
                     <Poster cover={r.event.cover} theme={r.event.theme} category={r.event.category} className="size-16 shrink-0 rounded-xl" />
@@ -104,7 +114,12 @@ export function Organizer() {
                       <div className="text-xs text-muted">{shortDate(r.event.startsAt)}</div>
                     </div>
                   </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                  {r.myRole !== "owner" && (
+                    <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs font-bold text-brand dark:bg-brand/20 dark:text-white">
+                      {ROLE_LABELS[r.myRole ?? ""] ?? "Équipe"}
+                    </div>
+                  )}
+                  {r.access.stats && <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
                     <div className="rounded-xl bg-card-2 py-2">
                       <div className="font-display text-base font-bold">{compact(r.sold)}</div>
                       <div className="text-muted">billets</div>
@@ -117,9 +132,12 @@ export function Organizer() {
                       <div className="font-display text-base font-bold">{compact(r.views)}</div>
                       <div className="text-muted">vues</div>
                     </div>
-                  </div>
+                  </div>}
                 </Link>
               ))}
+                  </div>
+                );
+              })}
             </div>
           )}
           {!data.pro && payments && <ProCard onDone={reload} />}
@@ -177,7 +195,8 @@ export function OrganizerEvent() {
 
   if (error) return (<><TopBar title="Gérer" /><ErrorState message={error.message} /></>);
   if (!ev || !dash) return <PageLoader />;
-  if (!ev.isOrganizer || !r) return (<><TopBar title="Gérer" /><ErrorState message="Vous n'êtes pas l'organisateur de cet événement." /></>);
+  if (!r || !r.myRole) return (<><TopBar title="Gérer" /><ErrorState message="Vous ne faites pas partie de l'équipe de cet événement." /></>);
+  const acc = r.access;
 
   const url = shareUrl(eventPath(ev)) + (ev.accessCode ? `?code=${ev.accessCode}` : "");
   const maxDay = Math.max(1, ...r.salesByDay.map((d) => d.qty));
@@ -196,7 +215,15 @@ export function OrganizerEvent() {
           <TierBadge tier={ev.impact.tier} />
         </Link>
 
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        {r.myRole !== "owner" && (
+          <div className="mt-3 rounded-2xl border border-brand/30 bg-brand-soft/60 p-3.5 text-sm dark:bg-brand/15">
+            Vous êtes <b>{(ROLE_LABELS[r.myRole] ?? "membre").toLowerCase()}</b> pour cet événement.
+            {r.myRole === "controleur" && " Ouvrez le scanner à l'entrée : chaque billet ne passe qu'une fois."}
+            {r.myRole === "photographe" && " Déposez vos photos : les personnes reconnues sont prévenues automatiquement."}
+          </div>
+        )}
+
+        {acc.stats && <><div className="mt-4 grid grid-cols-2 gap-3">
           <Stat label="Billets vendus" value={compact(r.sold)} sub={r.capacity ? `sur ${compact(r.capacity)}` : undefined} />
           <Stat label={payments ? "Recettes billets" : "Billets à encaisser"} value={formatFcfa(r.ticketRevenue)} sub={payments ? "versées après l'événement" : "payés à l'entrée"} />
           <Stat label="Entrées scannées" value={`${r.scanned}/${r.sold}`} />
@@ -220,13 +247,13 @@ export function OrganizerEvent() {
               ))}
             </div>
           </Card>
-        )}
+        )}</>}
 
         <h2 className="mb-3 mt-6 text-base font-bold">Actions</h2>
         <div className="grid grid-cols-2 gap-3">
-          <Action icon={<ScanLine />} label="Scanner les billets" onClick={() => nav(`/scanner?event=${ev.id}`)} />
-          <Action icon={<ImagePlus />} label="Déposer les photos" sub={`${r.photos} en ligne`} onClick={() => setPhotosOpen(true)} />
-          {credits > 0 && (
+          {acc.scan && <Action icon={<ScanLine />} label="Scanner les billets" sub={r.scanned ? `${r.scanned} entrée(s)` : undefined} onClick={() => nav(`/scanner?event=${ev.id}`)} />}
+          {acc.photos && <Action icon={<ImagePlus />} label="Déposer les photos" sub={`${r.photos} en ligne`} onClick={() => setPhotosOpen(true)} />}
+          {acc.edit && credits > 0 && (
             <Action
               icon={<Rocket />}
               label={usingCredit ? "Activation…" : "Boost offert"}
@@ -246,9 +273,9 @@ export function OrganizerEvent() {
               }}
             />
           )}
-          {payments && <Action icon={<Rocket />} label="Booster" sub={ev.boostedUntil && new Date(ev.boostedUntil) > new Date() ? "Boost actif" : "Passer en tête"} onClick={() => setBoostOpen(true)} />}
+          {acc.edit && payments && <Action icon={<Rocket />} label="Booster" sub={ev.boostedUntil && new Date(ev.boostedUntil) > new Date() ? "Boost actif" : "Passer en tête"} onClick={() => setBoostOpen(true)} />}
           <Action icon={<Share2 />} label="Partager" sub="WhatsApp" onClick={() => window.open(whatsappLink(`${ev.title} — ${shortDate(ev.startsAt)}, ${ev.venue}. Sur ToBe : ${url}`), "_blank")} />
-          <Action icon={<Radio />} label="Direct vidéo" sub={ev.liveUrl ? "Lien ajouté" : "Ajouter le lien"} onClick={() => setLiveOpen(true)} />
+          {acc.edit && <Action icon={<Radio />} label="Direct vidéo" sub={ev.liveUrl ? "Lien ajouté" : "Ajouter le lien"} onClick={() => setLiveOpen(true)} />}
           <Action icon={<Eye />} label="Voir la page" onClick={() => nav(eventPath(ev))} />
         </div>
 
@@ -270,7 +297,7 @@ export function OrganizerEvent() {
             </span>
           </Link>
         )}
-        {r.contestId && <ContestAdmin contestId={r.contestId} />}
+        {r.contestId && acc.edit && <ContestAdmin contestId={r.contestId} />}
         {r.cagnotte && r.cagnotteId && (
           <Link to={`/cagnotte/${r.cagnotteId}`} className="mt-3 flex items-center gap-3 rounded-2xl border border-line bg-card p-4">
             <HandCoins className="size-5 text-brand" />
@@ -288,7 +315,8 @@ export function OrganizerEvent() {
             </span>
           </div>
         )}
-        {r.sold === 0 && (
+        <EventTeam eventId={ev.id} />
+        {acc.delete && r.sold === 0 && (
           <Button
             full
             variant="danger"

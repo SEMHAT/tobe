@@ -110,6 +110,32 @@ export const routes: Route[] = [
   { method: "POST", path: "/tobe-requests", handler: (s, c) => s.requestTobe(need(c), c.body ?? {}) },
   { method: "GET", path: "/admin", handler: (s, c) => s.adminOverview(need(c)) },
   { method: "PATCH", path: "/admin/requests/:id", handler: (s, c) => s.updateTobeRequest(need(c), c.params.id, c.body?.status) },
+  { method: "PATCH", path: "/admin/requests/:id/assign", handler: (s, c) => s.team.assignRequest(need(c), c.params.id, c.body?.assignee ?? null) },
+
+  // Notifications push et rappels
+  { method: "POST", path: "/push/subscribe", handler: (s, c) => s.reminders.subscribe(c.userId, c.body ?? {}) },
+  { method: "POST", path: "/push/unsubscribe", handler: (s, c) => s.reminders.unsubscribe(c.body ?? {}) },
+  { method: "POST", path: "/game/installed", handler: (s, c) => s.game.markInstalled(need(c)) },
+  { method: "POST", path: "/push/test", handler: (s, c) => s.reminders.test(need(c)) },
+  { method: "GET", path: "/events/:id/remind", handler: (s, c) => s.reminders.status(c.userId, c.params.id, c.query.endpoint) },
+  { method: "POST", path: "/events/:id/remind", handler: (s, c) => s.reminders.follow(c.userId, c.params.id, c.body ?? {}) },
+  { method: "POST", path: "/events/:id/unremind", handler: (s, c) => s.reminders.unfollow(c.userId, c.params.id, c.body ?? {}) },
+  { method: "GET", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
+  { method: "POST", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
+
+  // Équipe ToBe
+  { method: "GET", path: "/team", handler: (s, c) => s.team.teamView(need(c)) },
+  { method: "POST", path: "/team/invites", handler: (s, c) => s.team.inviteTeam(need(c), c.body ?? {}) },
+  { method: "PATCH", path: "/team/members/:id", handler: (s, c) => s.team.setTeamRole(need(c), c.params.id, c.body?.role ?? null) },
+
+  // Équipe d'un événement et invitations
+  { method: "GET", path: "/events/:id/team", handler: (s, c) => s.team.eventTeam(need(c), c.params.id) },
+  { method: "POST", path: "/events/:id/team/invites", handler: (s, c) => s.team.inviteEvent(need(c), c.params.id, c.body ?? {}) },
+  { method: "DELETE", path: "/team-members/:id", handler: (s, c) => s.team.removeMember(need(c), c.params.id) },
+  { method: "GET", path: "/me/roles", handler: (s, c) => s.team.myEventRoles(need(c)) },
+  { method: "GET", path: "/invites/:token", handler: (s, c) => s.team.getInvite(c.params.token) },
+  { method: "POST", path: "/invites/:token/accept", handler: (s, c) => s.team.acceptInvite(need(c), c.params.token) },
+  { method: "DELETE", path: "/invites/:token", handler: (s, c) => s.team.revokeInvite(need(c), c.params.token) },
 ];
 
 export function matchRoute(method: string, path: string): { route: Route; params: Record<string, string> } | null {
