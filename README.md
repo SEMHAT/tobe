@@ -54,7 +54,8 @@ Réglages du projet Vercel (déjà faits) : racine du dépôt, install `npm ci`,
 Variables d'environnement :
 | Variable | Rôle |
 | --- | --- |
-| `DATABASE_URL` | Postgres Neon (ajoutée par l'intégration Neon) |
+| `ELEDJI_DATABASE_URL` | **Base commune ELEDJI** (intégration Neon de la base d'eledji.com, préfixe `ELEDJI`) : ToBe, eledji.com et admin.eledji.com partagent la même base. Prioritaire sur `DATABASE_URL`. |
+| `DATABASE_URL` | Ancienne base Neon de ToBe. Tant qu'elle reste reliée, chaque mise en production recopie ses documents dans la base commune (`scripts/fusion-eledji.mjs`). |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob pour les affiches et photos |
 | `RESEND_API_KEY`, `RESEND_EMAIL_DOMAIN` | Envoi des codes de connexion (expéditeur `connexion@eledji.com`, ou `EMAIL_FROM`) |
 | `GOOGLE_CLIENT_ID` | Facultatif : client OAuth Google (par défaut, celui de ToBe dans le projet Google Cloud ELEDJI) |

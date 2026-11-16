@@ -18,7 +18,7 @@
     "start": "npm run start -w server",
     "test": "npm run test -w packages/core && npm run test -w server && node --test --import tsx api/_lib/*.test.ts",
     "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w server && npm run typecheck -w web && tsc -p api/tsconfig.json",
-    "build:vercel": "npm run build -w web && rm -rf dist && cp -r web/dist dist"
+    "build:vercel": "node scripts/fusion-eledji.mjs && npm run build -w web && rm -rf dist && cp -r web/dist dist"
   },
   "engines": {
     "node": ">=22.13"

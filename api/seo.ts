@@ -11,7 +11,7 @@ import type { PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? process.env.POSTGRES_URL }) as unknown as PgPool;
+const pool = new Pool({ connectionString: process.env.ELEDJI_DATABASE_URL ?? process.env.DATABASE_URL ?? process.env.POSTGRES_URL }) as unknown as PgPool;
 
 let template: string | null = null;
 async function getTemplate(host: string | undefined): Promise<string> {
