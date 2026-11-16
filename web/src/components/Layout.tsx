@@ -41,13 +41,13 @@ function DesktopNav() {
   const { me, requireAuth } = useSession();
   const nav = useNavigate();
   const link = (to: string, label: string) => (
-    <NavLink to={to} end={to === "/"} className={({ isActive }) => cx("rounded-full px-4 py-2 text-[15px] font-semibold transition", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
+    <NavLink to={to} end={to === "/"} className={({ isActive }) => cx("whitespace-nowrap rounded-full px-3 py-2 text-[15px] font-semibold transition xl:px-4", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
       {label}
     </NavLink>
   );
   return (
     <header className="sticky top-0 z-40 hidden h-16 border-b border-line bg-app/90 backdrop-blur-xl lg:block">
-      <div className="mx-auto flex h-full max-w-[1240px] items-center gap-6 px-8">
+      <div className="mx-auto flex h-full max-w-[1240px] items-center gap-4 px-8 xl:gap-6">
         <Link to="/" aria-label="Accueil ToBe">
           <Logo height={34} />
         </Link>
@@ -55,10 +55,10 @@ function DesktopNav() {
           {link("/", "Accueil")}
           {link("/explorer", "Explorer")}
           {link("/photos", "Mes photos")}
-          <NavLink to="/club" className={({ isActive }) => cx("flex items-center gap-1.5 rounded-full px-4 py-2 text-[15px] font-semibold transition", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
+          <NavLink to="/club" className={({ isActive }) => cx("flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-[15px] font-semibold transition xl:px-4", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
             <Trophy className="size-4 text-[#f0a000]" /> Club
           </NavLink>
-          {link("/prestataires", "Prestataires")}
+          {!(me && me.team) && link("/prestataires", "Prestataires")}
           {me && link("/organisateur", "Organisateur")}
           {me?.team && link("/tobe", "Agence")}
         </nav>
@@ -72,8 +72,8 @@ function DesktopNav() {
               {!!me.unread && <span className="absolute right-2 top-2 size-2.5 rounded-full border-2 border-[var(--bg)] bg-coral" />}
             </Link>
           )}
-          <Link to="/creer" className="flex h-10 items-center gap-2 rounded-full brand-gradient px-5 text-sm font-bold text-white shadow-[0_8px_24px_-10px_rgba(24,0,173,0.7)] transition hover:brightness-110">
-            <Plus className="size-4" strokeWidth={2.6} /> Créer un événement
+          <Link to="/creer" className="flex h-10 items-center gap-2 whitespace-nowrap rounded-full brand-gradient px-5 text-sm font-bold text-white shadow-[0_8px_24px_-10px_rgba(24,0,173,0.7)] transition hover:brightness-110">
+            <Plus className="size-4" strokeWidth={2.6} /> <span>Créer<span className="hidden xl:inline"> un événement</span></span>
           </Link>
           {me ? (
             <Link to="/profil" aria-label="Mon profil">

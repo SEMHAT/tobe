@@ -384,7 +384,7 @@ function TeamAdmin() {
           </Button>
         )}
       </div>
-      <div className="mt-4 lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
+      <div className="mt-4 lg:grid lg:grid-cols-[1fr_340px] lg:items-start lg:gap-8">
         <div className="overflow-hidden rounded-2xl border border-line bg-card">
           {data.members.map((m) => {
             const editable = manage && !m.fixed && m.id !== me?.user.id && !!roleOf(m.role)?.assignable;
