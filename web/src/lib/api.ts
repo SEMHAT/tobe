@@ -11,6 +11,7 @@ export function getToken() {
   return token;
 }
 export function setToken(t: string | null) {
+  if (t !== token) viderCopies(); // changement de compte ou déconnexion : rien d'un autre compte ne reste
   token = t;
   if (t) localStorage.setItem(TOKEN_KEY, t);
   else localStorage.removeItem(TOKEN_KEY);
@@ -27,6 +28,46 @@ export class HttpError extends Error {
 }
 
 type Query = Record<string, string | number | boolean | undefined | null>;
+
+// ---------- Hors connexion ----------
+// Chaque lecture réussie (événements, billets, profil, messages…) est gardée sur le téléphone.
+// Sans réseau, l'application affiche la dernière version connue au lieu d'une erreur.
+const COPIES = "tobe-copie:";
+const MAX_COPIES = 60;
+const MAX_TAILLE = 250_000;
+let horsLigne = false;
+export const estHorsLigne = () => horsLigne;
+function signaler(etat: boolean) {
+  if (horsLigne === etat) return;
+  horsLigne = etat;
+  try { window.dispatchEvent(new CustomEvent("tobe-hors-ligne", { detail: etat })); } catch { /* */ }
+}
+function garderCopie(cle: string, data: unknown) {
+  try {
+    const txt = JSON.stringify({ t: Date.now(), d: data });
+    if (txt.length > MAX_TAILLE) return;
+    localStorage.setItem(COPIES + cle, txt);
+    const cles = Object.keys(localStorage).filter((k) => k.startsWith(COPIES));
+    if (cles.length > MAX_COPIES) {
+      cles.map((k) => [k, Number(JSON.parse(localStorage.getItem(k) ?? "{}").t ?? 0)] as const)
+        .sort((a, b) => a[1] - b[1]).slice(0, cles.length - MAX_COPIES).forEach(([k]) => localStorage.removeItem(k));
+    }
+  } catch { /* stockage plein ou navigation privée */ }
+}
+function lireCopie<T>(cle: string): T | undefined {
+  try {
+    const v = localStorage.getItem(COPIES + cle);
+    return v ? (JSON.parse(v).d as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function viderCopies() {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith(COPIES)).forEach((k) => localStorage.removeItem(k));
+    navigator.serviceWorker?.controller?.postMessage({ type: "vider" });
+  } catch { /* */ }
+}
 
 function qs(q?: Query) {
   if (!q) return "";
@@ -50,6 +91,7 @@ export async function api<T = any>(method: "GET" | "POST" | "PATCH" | "DELETE", 
     }
     return structuredClone(r.body) as T;
   }
+  const cle = `${path}${qs(query)}`;
   let res: Response;
   try {
     res = await fetch(`${API_URL}/api${path}${qs(query)}`, {
@@ -58,13 +100,23 @@ export async function api<T = any>(method: "GET" | "POST" | "PATCH" | "DELETE", 
       body: body !== undefined && method !== "GET" ? JSON.stringify(body) : undefined,
     });
   } catch {
+    // Pas de réseau : pour une lecture, la dernière version gardée sur le téléphone.
+    if (method === "GET") {
+      const copie = lireCopie<T>(cle);
+      if (copie !== undefined) {
+        signaler(true);
+        return copie;
+      }
+    }
     throw new HttpError(0, "Pas de connexion internet. Vérifiez votre réseau et réessayez.");
   }
+  signaler(false);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && token) setToken(null);
     throw new HttpError(res.status, data.error ?? "Erreur", data);
   }
+  if (method === "GET") garderCopie(cle, data);
   return data as T;
 }
 

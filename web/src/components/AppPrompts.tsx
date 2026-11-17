@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { canPromptInstall, enablePush, isAndroid, isIOS, isStandalone, promptInstall, pushState, wasInstalled } from "../lib/push";
 import { useSession } from "../lib/session";
+import { estHorsLigne } from "../lib/api";
 import { Button, Sheet, cx } from "./ui";
 
 // =====================================================================
@@ -279,5 +280,31 @@ export function NotifyPrompt() {
         <Ticket className="size-3.5" /> Uniquement vos événements. Désactivable à tout moment dans le profil.
       </p>
     </Sheet>
+  );
+}
+
+/** Bandeau discret : sans réseau, l'application montre les dernières infos gardées sur le téléphone. */
+export function OfflineBanner() {
+  const [off, setOff] = useState(false);
+  useEffect(() => {
+    const maj = () => setOff(!navigator.onLine || estHorsLigne());
+    const api = (e: Event) => setOff((e as CustomEvent<boolean>).detail || !navigator.onLine);
+    maj();
+    window.addEventListener("online", maj);
+    window.addEventListener("offline", maj);
+    window.addEventListener("tobe-hors-ligne", api);
+    return () => {
+      window.removeEventListener("online", maj);
+      window.removeEventListener("offline", maj);
+      window.removeEventListener("tobe-hors-ligne", api);
+    };
+  }, []);
+  if (!off) return null;
+  return (
+    <div className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+8px)] z-[80] flex justify-center px-3">
+      <p className="flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-[12.5px] font-semibold text-white shadow-lg">
+        <WifiOff className="size-3.5" /> Hors connexion · dernières infos gardées sur ce téléphone
+      </p>
+    </div>
   );
 }

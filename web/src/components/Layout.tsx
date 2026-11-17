@@ -1,7 +1,7 @@
 import { Bell, Compass, Home, Plus, ScanFace, Search, Trophy, User } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { InstallPrompt, NotifyPrompt } from "./AppPrompts";
+import { InstallPrompt, NotifyPrompt, OfflineBanner } from "./AppPrompts";
 import { useRouteRobots } from "../lib/seo";
 import { SessionProvider, useSession } from "../lib/session";
 import { cx } from "./ui";
@@ -154,6 +154,7 @@ function Frame() {
       </div>
       {showTabs && <BottomNav />}
       <InstallPrompt />
+      <OfflineBanner />
       <NotifyPrompt />
     </div>
   );
