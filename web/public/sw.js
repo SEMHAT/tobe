@@ -1,28 +1,121 @@
-// Service worker : l'application s'ouvre hors connexion (billets déjà chargés)
-// et reçoit les notifications push même quand elle est fermée, comme WhatsApp.
-const CACHE = "tobe-v4";
+// Service worker de ToBe : l'application s'ouvre et s'utilise hors connexion
+// (événements, billets et profil déjà consultés), et reçoit les notifications push
+// même quand elle est fermée, comme WhatsApp.
+const VERSION = "tobe-v5";
+const COQUILLE = `${VERSION}-coquille`; // index.html + scripts/styles de la version en ligne
+const MEDIAS = "tobe-medias";             // affiches et photos déjà vues (gardées d'une version à l'autre)
+const MAX_MEDIAS = 250;
+const DELAI = 4000; // réseau lent (2G/3G) : au-delà, on ouvre la copie locale
+
+async function garderCoquille(html) {
+  const c = await caches.open(COQUILLE);
+  await c.put("/index.html", new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } }));
+  // Les fichiers de la version (noms uniques) : l'application démarre sans réseau dès la 1re visite.
+  const fichiers = [...new Set([...html.matchAll(/\/(?:assets|models)\/[^"'\s)]+/g)].map((m) => m[0]))];
+  await Promise.all(fichiers.map(async (u) => { try { if (!(await c.match(u))) { const r = await fetch(u); if (r.ok) await c.put(u, r); } } catch {} }));
+}
+
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/index.html", "/manifest.webmanifest", "/icon-192.png"])).then(() => self.skipWaiting()));
+  e.waitUntil(
+    (async () => {
+      try {
+        const r = await fetch("/index.html", { cache: "no-store" });
+        if (r.ok) await garderCoquille(await r.text());
+      } catch {}
+      await (await caches.open(COQUILLE)).addAll(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/logo.png", "/badge-96.png"]).catch(() => {});
+      await self.skipWaiting();
+    })(),
+  );
 });
+
 self.addEventListener("activate", (e) => {
-  e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(
+    (async () => {
+      for (const k of await caches.keys()) if (k !== COQUILLE && k !== MEDIAS) await caches.delete(k);
+      if (self.registration.navigationPreload) await self.registration.navigationPreload.enable().catch(() => {});
+      await self.clients.claim();
+    })(),
+  );
 });
+
+async function limiter(nom, max) {
+  const c = await caches.open(nom);
+  const cles = await c.keys();
+  for (const k of cles.slice(0, Math.max(0, cles.length - max))) await c.delete(k);
+}
+
 self.addEventListener("fetch", (e) => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api")) return;
-  if (e.request.mode === "navigate") {
-    e.respondWith(fetch(e.request).catch(() => caches.match("/index.html")));
+  const req = e.request;
+  const url = new URL(req.url);
+  if (req.method !== "GET") return;
+
+  // Affiches et photos (Vercel Blob ou le site) : la copie locale d'abord.
+  const media = /\.(jpe?g|png|webp|avif|gif)$/i.test(url.pathname) && (url.origin === location.origin || url.hostname.endsWith(".blob.vercel-storage.com"));
+  if (media && !url.pathname.startsWith("/api")) {
+    e.respondWith(
+      (async () => {
+        const c = await caches.open(url.origin === location.origin && !url.pathname.startsWith("/uploads") ? COQUILLE : MEDIAS);
+        const hit = await c.match(req);
+        if (hit) return hit;
+        try {
+          const r = await fetch(req);
+          if (r.ok || r.type === "opaque") { await c.put(req, r.clone()).catch(() => {}); e.waitUntil(limiter(MEDIAS, MAX_MEDIAS)); }
+          return r;
+        } catch {
+          return new Response("", { status: 504 });
+        }
+      })(),
+    );
     return;
   }
+  if (url.origin !== location.origin || url.pathname.startsWith("/api")) return;
+
+  // Pages (application à page unique) : réseau d'abord, copie locale si le réseau manque ou traîne.
+  if (req.mode === "navigate") {
+    e.respondWith(
+      (async () => {
+        const reseau = (async () => {
+          const r = (await e.preloadResponse) || (await fetch(req));
+          if (r.ok && (r.headers.get("content-type") || "").includes("text/html")) {
+            const html = await r.clone().text();
+            // Seule la coquille de l'application est gardée (pas les pages SEO pré-rendues).
+            if (html.includes('id="root"')) e.waitUntil(garderCoquille(html).catch(() => {}));
+          }
+          return r;
+        })();
+        const copie = async () => (await caches.match("/index.html")) || (await caches.match("/"));
+        try {
+          const premier = await Promise.race([reseau, new Promise((ok) => setTimeout(ok, DELAI, "lent"))]);
+          if (premier !== "lent") return premier;
+          const c = await copie();
+          if (c) { e.waitUntil(reseau.catch(() => {})); return c; }
+          return await reseau;
+        } catch {
+          return (await copie()) || new Response("<h1>ToBe</h1><p>Pas de connexion. Réessayez dans un instant.</p>", { headers: { "content-type": "text/html; charset=utf-8" } });
+        }
+      })(),
+    );
+    return;
+  }
+
+  // Scripts, styles, modèles 3D : noms uniques, la copie locale d'abord.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-      if (res.ok && (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/models/"))) {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+    (async () => {
+      const hit = await caches.match(req);
+      if (hit) return hit;
+      const r = await fetch(req);
+      if (r.ok && (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/models/") || url.pathname.startsWith("/fonts/"))) {
+        const copie = r.clone();
+        e.waitUntil(caches.open(COQUILLE).then((c) => c.put(req, copie)));
       }
-      return res;
-    })),
+      return r;
+    })(),
   );
+});
+
+self.addEventListener("message", (e) => {
+  // Déconnexion : les photos privées éventuellement gardées sont effacées.
+  if (e.data && e.data.type === "vider") e.waitUntil(caches.delete(MEDIAS));
 });
 
 // ---------- Notifications push ----------
