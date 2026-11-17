@@ -6,8 +6,12 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
 
 const ancienne = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
-const commune = process.env.ELEDJI_DATABASE_URL;
-if (!ancienne || !commune || ancienne === commune || process.env.VERCEL_ENV !== "production") {
+const commune = process.env.ELEDJI_DATABASE_URL ?? process.env.ELEDJI_DATABASE_DATABASE_URL;
+// Copie sur toute construction sauf aperçu ou développement explicites : la mise en ligne
+// n'a lieu que si la copie a réussi (une erreur fait échouer la construction, l'ancienne
+// version reste en ligne).
+const env = process.env.VERCEL_ENV ?? process.env.VERCEL_TARGET_ENV ?? "production";
+if (!ancienne || !commune || ancienne === commune || env === "preview" || env === "development") {
   console.log("[fusion] rien à copier");
   process.exit(0);
 }
