@@ -2,6 +2,13 @@
 
 /** Identifiant client OAuth de ToBe (public, projet Google Cloud ELEDJI). Remplaçable par GOOGLE_CLIENT_ID. */
 export const DEFAULT_GOOGLE_CLIENT_ID = "993607843202-51g06okv6ptss0hfd8sg1to443n0t8fi.apps.googleusercontent.com";
+/** Compte ELEDJI déjà connecté sur eledji.com (lu côté serveur depuis la session partagée). */
+export interface EledjiProfile {
+  email: string;
+  name?: string | null;
+  image?: string | null;
+}
+
 export interface GoogleProfile {
   sub: string;
   email: string;

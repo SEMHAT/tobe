@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
-import { runApi, sessionUser, type PgPool } from "./_lib/store.js";
+import { profilEledji, runApi, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 
@@ -52,7 +52,8 @@ export default async function handler(req: Req, res: ServerResponse) {
     }
     const query: Record<string, string> = {};
     url.searchParams.forEach((v, k) => (query[k] = v));
-    const r = await runApi(pool, process.env, { method: req.method ?? "GET", path: `/${sub}`, query, body, token });
+    const eledji = sub === "auth/eledji" && req.method === "POST" ? await profilEledji(pool, req.headers.cookie) : undefined;
+    const r = await runApi(pool, process.env, { method: req.method ?? "GET", path: `/${sub}`, query, body, token, eledji: eledji ?? undefined });
     return send(res, r.status, r.body);
   } catch (e) {
     console.error(e);

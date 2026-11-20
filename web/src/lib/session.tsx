@@ -65,6 +65,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
+    // Compte unique ELEDJI : déjà connecté sur eledji.com → connecté ici aussi, sans rien redemander.
+    if (!getToken() && (await connexionEledji())) {
+      window.dispatchEvent(new CustomEvent("tobe-toast", { detail: "Connecté avec votre compte ELEDJI" }));
+    }
     if (!getToken()) {
       setMe(null);
       setReady(true);
@@ -125,6 +129,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
+      // Déconnexion volontaire : on ne reconnecte plus automatiquement avec le compte ELEDJI.
+      localStorage.setItem("tobe-sans-eledji", "1");
       await api("POST", "/auth/logout");
     } catch {
       /* rien */
@@ -161,6 +167,36 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       </div>
     </SessionCtx.Provider>
   );
+}
+
+// ---------- Compte unique ELEDJI ----------
+const surEledji = () => typeof location !== "undefined" && (location.hostname === "eledji.com" || location.hostname.endsWith(".eledji.com"));
+
+/** Échange la session d'eledji.com (cookie partagé) contre une session ToBe. Silencieux en cas d'échec. */
+async function connexionEledji(): Promise<boolean> {
+  if (!surEledji()) return false;
+  const url = new URL(location.href);
+  const retour = url.searchParams.has("eledji");
+  if (retour) {
+    // Retour depuis eledji.com/connexion : on nettoie l'adresse et on autorise la reconnexion.
+    url.searchParams.delete("eledji");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    localStorage.removeItem("tobe-sans-eledji");
+  } else if (localStorage.getItem("tobe-sans-eledji")) return false;
+  try {
+    const r = await api<{ token: string }>("POST", "/auth/eledji");
+    setToken(r.token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Page de connexion ELEDJI, qui ramène automatiquement ici une fois connecté. */
+export function lienCompteEledji() {
+  const ici = new URL(location.href);
+  ici.searchParams.set("eledji", "1");
+  return `https://eledji.com/connexion?next=${encodeURIComponent(ici.toString())}`;
 }
 
 // ---------- Connexion avec Google (Google Identity Services) ----------
@@ -296,6 +332,15 @@ function AuthSheet({ open, reason, googleClientId, onClose, onDone }: { open: bo
           className="space-y-4"
         >
           <p className="text-sm text-muted">{reason ?? "Rejoignez ToBe en quelques secondes, sans mot de passe."}</p>
+          {surEledji() && (
+            <a
+              href={lienCompteEledji()}
+              onClick={() => localStorage.removeItem("tobe-sans-eledji")}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-brand px-4 text-sm font-semibold text-white transition active:scale-[0.98]"
+            >
+              Continuer avec mon compte ELEDJI
+            </a>
+          )}
           {googleClientId && (
             <>
               <GoogleButton clientId={googleClientId} onCredential={google} />

@@ -2,7 +2,7 @@ import type { Db } from "./db.js";
 import { Game } from "./game.js";
 import { Team, TEAM_ROLES } from "./team.js";
 import { Reminders, type PushPayload, type PushSender } from "./reminders.js";
-import type { GoogleProfile } from "./google.js";
+import type { EledjiProfile, GoogleProfile } from "./google.js";
 import {
   FACE_CONSISTENCY_MAX,
   FACE_MATCH_THRESHOLD,
@@ -331,6 +331,11 @@ export class ToBeService {
     if (!profile) throw new ApiError(400, "Connexion Google invalide");
     if (!this.opts.googleClientId) throw new ApiError(400, "Connexion Google non disponible");
     return this.signIn(normalizeEmail(profile.email), { name: profile.name, avatar: profile.picture, googleId: profile.sub });
+  }
+
+  loginWithEledji(profile: EledjiProfile | undefined) {
+    if (!profile?.email) throw new ApiError(401, "Aucune session ELEDJI");
+    return this.signIn(normalizeEmail(profile.email), { name: profile.name ?? undefined, avatar: profile.image ?? null });
   }
 
   private signIn(email: string, extra: { name?: string; avatar?: string | null; googleId?: string }): { token: string; user: User; isNew: boolean } {

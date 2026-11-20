@@ -42,3 +42,37 @@ test("API sur Postgres : connexion, écriture sous verrou, lectures concurrentes
     await db.close();
   }
 });
+
+test("Compte unique ELEDJI : la session d'eledji.com ouvre une session ToBe", { timeout: 120_000 }, async () => {
+  const { profilEledji } = await import("./store.js");
+  const db = new PGlite();
+  let queue = Promise.resolve();
+  const pool: PgPool = {
+    connect: () =>
+      new Promise((resolve) => {
+        queue = queue.then(() => new Promise<void>((release) => resolve({ query: async (text: string, params?: unknown[]) => ({ rows: (await db.query(text, params)).rows as any[] }), release: () => release() })));
+      }),
+  };
+  // Sans tables Auth.js (base locale) : rien, sans erreur.
+  assert.equal(await profilEledji(pool, "__Secure-authjs.session-token=abc"), null);
+  // (le schéma « docs » est mis en cache par module : on le crée ici pour cette seconde base)
+  await db.exec(`CREATE TABLE docs (collection TEXT NOT NULL, id TEXT NOT NULL, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (collection, id));
+    CREATE TABLE "user" (id text primary key, name text, email text, image text);
+    CREATE TABLE session ("sessionToken" text primary key, "userId" text, expires timestamptz);
+    INSERT INTO "user" VALUES ('u1', 'Awa K.', 'Awa@Exemple.tg', null);
+    INSERT INTO session VALUES ('jeton-ok', 'u1', now() + interval '1 day'), ('jeton-vieux', 'u1', now() - interval '1 day');`);
+  assert.equal(await profilEledji(pool, undefined), null);
+  assert.equal(await profilEledji(pool, "__Secure-authjs.session-token=jeton-vieux"), null);
+  const p = await profilEledji(pool, "theme=dark; __Secure-authjs.session-token=jeton-ok");
+  assert.equal(p?.email, "awa@exemple.tg");
+  const env = { EXPOSE_OTP: "true" };
+  // Sans session ELEDJI vérifiée par le serveur : refus, même si le corps prétend le contraire.
+  assert.equal((await runApi(pool, env, { method: "POST", path: "/auth/eledji", body: { email: "x@y.tg" }, query: {}, token: null })).status, 401);
+  const r = await runApi(pool, env, { method: "POST", path: "/auth/eledji", body: {}, query: {}, token: null, eledji: p! });
+  assert.equal(r.status, 200);
+  const { token, user } = r.body as { token: string; user: { email: string; name: string } };
+  assert.equal(user.email, "awa@exemple.tg");
+  assert.equal(user.name, "Awa K.");
+  assert.ok(await sessionUser(pool, token));
+  await db.close();
+});
