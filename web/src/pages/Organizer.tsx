@@ -196,6 +196,7 @@ export function OrganizerEvent() {
   const [usingCredit, setUsingCredit] = useState(false);
 
   if (error) return (<><TopBar title="Gérer" /><ErrorState message={error.message} /></>);
+  if (!me) return (<><TopBar title="Gérer" /><ErrorState message="Connectez-vous pour gérer cet événement." /></>);
   if (!ev || !dash) return <PageLoader />;
   if (!r || !r.myRole) return (<><TopBar title="Gérer" /><ErrorState message="Vous ne faites pas partie de l'équipe de cet événement." /></>);
   const acc = r.access;

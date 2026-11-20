@@ -104,6 +104,9 @@ export const routes: Route[] = [
   { method: "GET", path: "/organizer", handler: (s, c) => s.organizerDashboard(need(c)) },
   { method: "GET", path: "/providers", handler: (s, c) => s.listProviders(c.query) },
   { method: "POST", path: "/providers", handler: (s, c) => s.applyProvider(need(c), c.body ?? {}) },
+  { method: "POST", path: "/client-errors", handler: (s, c) => s.reportClientError(c.userId, c.body ?? {}) },
+  { method: "GET", path: "/admin/client-errors", handler: (s, c) => s.clientErrors(need(c)) },
+  { method: "DELETE", path: "/admin/client-errors", handler: (s, c) => s.clearClientErrors(need(c)) },
   { method: "GET", path: "/me/provider", handler: (s, c) => s.myProvider(need(c)) },
   { method: "PATCH", path: "/admin/providers/:id", handler: (s, c) => s.setProviderStatus(need(c), c.params.id, c.body ?? {}) },
   { method: "POST", path: "/providers/:id/quote", handler: (s, c) => s.requestQuote(need(c), c.params.id, c.body ?? {}) },
@@ -173,7 +176,8 @@ export function handleApi(
   const user = svc.userFromToken(req.token ?? null);
   try {
     const out = m.route.handler(svc, { userId: user?.id ?? null, token: req.token ?? null, params: m.params, query: req.query ?? {}, body: req.body ?? {}, verified: req.verified ?? {} });
-    return { status: 200, body: out ?? { ok: true } };
+    // `null` est une vraie réponse (« rien ») : on ne la remplace pas par { ok: true }.
+    return { status: 200, body: out === undefined ? { ok: true } : out };
   } catch (e) {
     if (e instanceof ApiError) return { status: e.status, body: { error: e.message, ...(e.data ?? {}) } };
     const msg = e instanceof Error ? e.message : "Erreur inattendue";

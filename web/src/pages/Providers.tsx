@@ -24,7 +24,7 @@ const CAT_LABEL = Object.fromEntries(CATS);
 export function Providers() {
   const { me } = useSession();
   const [apply, setApply] = useState(false);
-  const { data: mine, reload: reloadMine } = useLoad(async () => (me ? api<Provider | null>("GET", "/me/provider") : null), [me?.user.id]);
+  const { data: mine, reload: reloadMine } = useLoad(async () => (me ? api<Provider | null>("GET", "/me/provider").then((p) => (p && "id" in p ? p : null)) : null), [me?.user.id]);
   const [category, setCategory] = useState("all");
   const [q, setQ] = useState("");
   const { data, error, loading } = useLoad(() => api<Provider[]>("GET", "/providers", undefined, { category, q }), [category, q]);
@@ -155,12 +155,12 @@ function ApplySheet({ open, onClose, mine, onDone }: { open: boolean; onClose: (
   const [price, setPrice] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (open && mine) {
-      setName(mine.name);
-      setCategory(mine.category);
-      setCity(mine.city);
-      setBio(mine.bio);
-      setPhone(mine.phone);
+    if (open && mine?.id) {
+      setName(mine.name ?? "");
+      setCategory(mine.category ?? "mc");
+      setCity(mine.city ?? "Lomé");
+      setBio(mine.bio ?? "");
+      setPhone(mine.phone ?? "");
       setPrice(mine.priceFrom ? String(mine.priceFrom) : "");
     } else if (open && me?.user.phone) setPhone(me.user.phone);
   }, [open, mine, me]);

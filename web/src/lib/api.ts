@@ -2,7 +2,7 @@ import { putMedia } from "./media";
 
 /** Mode démo : toute l'API tourne dans le navigateur (même code que le serveur), sans backend. */
 export const isDemo = import.meta.env.VITE_DEMO === "true";
-const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+export const API_URL = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 const TOKEN_KEY = "tobe-token";
 let token: string | null = typeof localStorage !== "undefined" ? localStorage.getItem(TOKEN_KEY) : null;

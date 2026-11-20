@@ -81,7 +81,9 @@ function EditForm({ ev }: { ev: EventView }) {
 
   const sold = ev.ticketTypes.reduce((n, t) => n + t.sold, 0);
   const soldPaid = ev.ticketTypes.some((t) => t.sold > 0 && t.price > 0);
-  const dateChanged = new Date(startsAt).toISOString() !== ev.startsAt;
+  const startDate = startsAt ? new Date(startsAt) : null;
+  const dateOk = !!startDate && !Number.isNaN(startDate.getTime());
+  const dateChanged = dateOk && startDate!.toISOString() !== ev.startsAt;
   const placeChanged = venue.trim() !== ev.venue || city.trim() !== ev.city;
   const warnPeople = sold > 0 && (dateChanged || placeChanged);
 
@@ -128,6 +130,8 @@ function EditForm({ ev }: { ev: EventView }) {
   };
 
   const save = async () => {
+    if (!dateOk) return toast("Indiquez la date et l'heure de début", "error");
+    if (endsAt && Number.isNaN(new Date(endsAt).getTime())) return toast("La date de fin n'est pas valide", "error");
     if (warnPeople && !confirm(`${sold} personne(s) ont déjà une place. Elles recevront une notification avec la nouvelle ${dateChanged ? "date" : "adresse"}. Continuer ?`)) return;
     setBusy(true);
     try {

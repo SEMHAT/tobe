@@ -187,6 +187,17 @@ export interface CreateEventInput {
 
 const DAY = 86_400_000;
 
+export interface ClientError {
+  message: string;
+  path: string;
+  stack: string;
+  ua: string;
+  userId: string | null;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+}
+
 export class ToBeService {
   private opts: Required<Omit<ServiceOptions, "sendCode" | "googleClientId" | "push">> & Pick<ServiceOptions, "sendCode" | "googleClientId" | "push">;
   /** ToBe Club : jeu, points et récompenses. */
@@ -1293,6 +1304,37 @@ export class ToBeService {
       : this.db.providers.insert({ id: newId("prv"), ownerId: user.id, status: "pending", rating: 0, reviews: 0, certified: false, theme: "nuit", ...data });
     if (!existing) for (const a of this.db.users.filter((u) => this.team.can(u, "providers.moderate") && u.id !== user.id)) this.notify(a.id, "Nouveau prestataire à valider", p.name, "/tobe");
     return p;
+  }
+
+  /** Erreur survenue dans l'application d'un visiteur : on garde les 60 dernières. */
+  reportClientError(userId: string | null, input: { message?: string; stack?: string; path?: string; ua?: string }) {
+    const message = String(input.message ?? "").slice(0, 300);
+    if (!message) return { ok: true };
+    const doc = this.db.settings.get("client-errors") ?? { id: "client-errors", value: { items: [] as unknown[] } };
+    const items = (doc.value.items as ClientError[]) ?? [];
+    const path = String(input.path ?? "").slice(0, 200);
+    const same = items.find((x) => x.message === message && x.path === path);
+    if (same) {
+      same.count++;
+      same.lastAt = new Date().toISOString();
+      if (userId) same.userId = userId;
+    } else {
+      items.unshift({ message, path, stack: String(input.stack ?? "").slice(0, 2000), ua: String(input.ua ?? "").slice(0, 250), userId, count: 1, firstAt: new Date().toISOString(), lastAt: new Date().toISOString() });
+    }
+    items.sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+    this.db.settings.insert({ id: "client-errors", value: { items: items.slice(0, 60) } });
+    return { ok: true };
+  }
+
+  clientErrors(userId: string) {
+    this.requireAdmin(userId, "team.manage");
+    return ((this.db.settings.get("client-errors")?.value.items as ClientError[]) ?? []).slice(0, 60);
+  }
+
+  clearClientErrors(userId: string) {
+    this.requireAdmin(userId, "team.manage");
+    this.db.settings.insert({ id: "client-errors", value: { items: [] } });
+    return { ok: true };
   }
 
   myProvider(userId: string) {

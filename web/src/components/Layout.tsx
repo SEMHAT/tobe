@@ -1,5 +1,6 @@
 import { Bell, Compass, Home, Plus, ScanFace, Search, Trophy, User } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { InstallPrompt, NotifyPrompt, OfflineBanner } from "./AppPrompts";
 import { useRouteRobots } from "../lib/seo";
@@ -148,7 +149,9 @@ function Frame() {
       <div ref={scroller} id="scroller" className={cx("h-full overflow-y-auto overflow-x-hidden bg-app text-ink no-scrollbar lg:[scrollbar-width:auto]", showTabs && "pb-[92px] lg:pb-0")}>
         <DesktopNav />
         <div className={cx(loc.pathname !== "/" && "lg:mx-auto lg:px-8 lg:pt-6", loc.pathname !== "/" && (wide ? "lg:max-w-[1240px]" : "lg:max-w-[820px]"))}>
-          <Outlet />
+          <ErrorBoundary resetKey={loc.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
         <Footer />
       </div>

@@ -1,5 +1,5 @@
-import type { EventCard, Provider, TobeRequest } from "@tobe/core";
-import { BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
+import type { ClientError, EventCard, Provider, TobeRequest } from "@tobe/core";
+import { Bug, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
 import { useState } from "react";
 import { InviteSheet, type InviteResult } from "../components/TeamInvite";
 import { Avatar } from "../components/visual";
@@ -202,6 +202,7 @@ export function TobeAdmin() {
         </div>
         {can("club.manage") && <ClubAdmin />}
         <TeamAdmin />
+        {can("team.manage") && <ErrorsAdmin />}
       </div>
     </div>
   );
@@ -451,6 +452,56 @@ function TeamAdmin() {
         create={(role, label) => api<InviteResult>("POST", "/team/invites", { role, label })}
         onCreated={reload}
       />
+    </section>
+  );
+}
+
+/** Erreurs rencontrées par les visiteurs dans l'application, signalées automatiquement. */
+function ErrorsAdmin() {
+  const { toast } = useSession();
+  const { data, setData } = useLoad(() => api<ClientError[]>("GET", "/admin/client-errors"), []);
+  const [open, setOpen] = useState<number | null>(null);
+  if (!data) return null;
+  return (
+    <section className="rounded-[24px] border border-line bg-card p-4 lg:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold">
+          <Bug className="size-5 text-brand" /> Erreurs de l'application
+        </h2>
+        {data.length > 0 && (
+          <button
+            className="text-sm font-semibold text-brand"
+            onClick={async () => {
+              try {
+                await api("DELETE", "/admin/client-errors");
+                setData([]);
+                toast("Liste vidée");
+              } catch (e) {
+                toast((e as Error).message, "error");
+              }
+            }}
+          >
+            Tout effacer
+          </button>
+        )}
+      </div>
+      {data.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">Aucune erreur signalée. Tout roule.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {data.map((x, i) => (
+            <li key={i} className="rounded-2xl bg-card-2 p-3 text-sm">
+              <button className="w-full text-left" onClick={() => setOpen(open === i ? null : i)}>
+                <div className="font-semibold">{x.message}</div>
+                <div className="mt-0.5 text-xs text-muted">
+                  {x.path} · {x.count} fois · {ago(x.lastAt)}
+                </div>
+              </button>
+              {open === i && <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all text-[11px] text-muted">{x.ua}\n\n{x.stack}</pre>}
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

@@ -4,6 +4,10 @@ import { App } from "./App";
 import "./styles.css";
 // Chargé tout de suite : capte l'événement d'installation (PWA) avant qu'il ne se perde.
 import "./lib/push";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { listenGlobalErrors } from "./lib/errors";
+
+listenGlobalErrors();
 
 // Lien de parrainage : https://tobe.eledji.com/?ref=CODE
 try {
@@ -15,7 +19,9 @@ try {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary full>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 
