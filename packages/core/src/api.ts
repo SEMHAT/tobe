@@ -1,5 +1,5 @@
 import { ApiError } from "./errors.js";
-import type { GoogleProfile } from "./google.js";
+import type { EledjiProfile, GoogleProfile } from "./google.js";
 import type { ToBeService } from "./service.js";
 
 /**
@@ -13,7 +13,7 @@ export interface RouteCtx {
   query: Record<string, string | undefined>;
   body: any;
   /** Données vérifiées par le serveur avant l'appel (jamais lues dans la requête). */
-  verified: { google?: GoogleProfile };
+  verified: { google?: GoogleProfile; eledji?: EledjiProfile };
 }
 
 type Handler = (svc: ToBeService, ctx: RouteCtx) => unknown;
@@ -38,6 +38,8 @@ export const routes: Route[] = [
   { method: "POST", path: "/auth/otp", handler: (s, c) => s.requestOtp(String(c.body?.email ?? "")) },
   { method: "POST", path: "/auth/verify", handler: (s, c) => s.verifyOtp(String(c.body?.email ?? ""), String(c.body?.code ?? ""), c.body?.name) },
   { method: "POST", path: "/auth/google", handler: (s, c) => s.loginWithGoogle(c.verified.google) },
+  // Compte unique ELEDJI : la session d'eledji.com (cookie partagé *.eledji.com), vérifiée par le serveur.
+  { method: "POST", path: "/auth/eledji", handler: (s, c) => s.loginWithEledji(c.verified.eledji) },
   { method: "POST", path: "/auth/logout", handler: (s, c) => (c.token && s.logout(c.token), { ok: true }) },
 
   // Compte
@@ -169,7 +171,7 @@ export interface ApiResult {
 /** Exécute une requête de l'API sur un service. Ne lève jamais : renvoie un statut HTTP. */
 export function handleApi(
   svc: ToBeService,
-  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; verified?: { google?: GoogleProfile } },
+  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; verified?: { google?: GoogleProfile; eledji?: EledjiProfile } },
 ): ApiResult {
   const m = matchRoute(req.method.toUpperCase(), req.path);
   if (!m) return { status: 404, body: { error: "Route inconnue" } };

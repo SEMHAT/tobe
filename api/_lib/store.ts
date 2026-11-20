@@ -1,5 +1,5 @@
 import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
-import { COLLECTIONS, createDb, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot } from "../../packages/core/src/index.js";
+import { COLLECTIONS, createDb, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
 export interface PgClient {
@@ -47,13 +47,13 @@ export function serviceOptions(env: Record<string, string | undefined>) {
 export async function runApi(
   pool: PgPool,
   env: Record<string, string | undefined>,
-  req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null },
+  req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null; eledji?: EledjiProfile },
 ): Promise<ApiResult> {
   await ensureSchema(pool);
   // Vérifications externes (Google) avant d'ouvrir la transaction.
   const pre = await preVerify(req, env);
   if (pre.error) return pre.error;
-  const full = { ...req, verified: pre.verified };
+  const full = { ...req, verified: { ...pre.verified, eledji: req.eledji } };
   const attempt = async (lock: boolean): Promise<ApiResult | null> => {
     const client = await pool.connect();
     try {
@@ -129,6 +129,32 @@ export async function sessionUser(pool: PgPool, token: string | null): Promise<s
   try {
     const { rows } = await c.query("SELECT data FROM docs WHERE collection = 'sessions' AND id = $1", [token]);
     return rows[0]?.data?.userId ?? null;
+  } finally {
+    c.release();
+  }
+}
+
+/**
+ * Compte unique ELEDJI : eledji.com pose son cookie de session sur *.eledji.com.
+ * On retrouve la personne dans la base partagée (tables d'Auth.js), sans rien lui redemander.
+ */
+export async function profilEledji(pool: PgPool, cookie: string | undefined): Promise<EledjiProfile | null> {
+  const jeton = (cookie ?? "")
+    .split(/;\s*/)
+    .map((c) => c.split("="))
+    .find(([k]) => k === "__Secure-authjs.session-token" || k === "authjs.session-token")?.[1];
+  if (!jeton || jeton.length > 200) return null;
+  const c = await pool.connect();
+  try {
+    const { rows } = await c.query(
+      `SELECT lower(u.email) AS email, u.name, u.image FROM public.session s JOIN public."user" u ON u.id = s."userId"
+        WHERE s."sessionToken" = $1 AND s.expires > now() LIMIT 1`,
+      [decodeURIComponent(jeton)],
+    );
+    const r = rows[0] as EledjiProfile | undefined;
+    return r?.email ? r : null;
+  } catch {
+    return null; // tables absentes (base locale) : pas de compte ELEDJI
   } finally {
     c.release();
   }
