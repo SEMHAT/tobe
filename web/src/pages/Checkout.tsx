@@ -35,6 +35,13 @@ export function Checkout() {
       </>
     );
 
+  if (e.access === "none" || !e.ticketTypes.length)
+    return (
+      <>
+        <TopBar title="Billets" />
+        <ErrorState message="Pas de billetterie ToBe pour cet événement : l'organisateur gère l'entrée autrement. Consultez les infos d'entrée sur la page de l'événement." />
+      </>
+    );
   const tt = e.ticketTypes.find((t) => t.id === typeId) ?? e.ticketTypes[0];
   const paid = (tt?.price ?? 0) > 0;
   const online = paid && payments;

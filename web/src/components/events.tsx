@@ -9,6 +9,7 @@ export const eventPath = (e: { slug: string }) => `/evenement/${e.slug}`;
 
 function Price({ e }: { e: EventCard }) {
   if (e.access === "invite") return <span>Sur invitation</span>;
+  if (e.access === "none") return e.entryInfo ? <span className="truncate">{e.entryInfo.length > 28 ? "Infos d'entrée" : e.entryInfo}</span> : null;
   if (e.priceFrom <= 0) return <span className="text-emerald">Gratuit</span>;
   return <span>Dès {formatFcfa(e.priceFrom)}</span>;
 }
@@ -30,9 +31,11 @@ export function HeroCard({ e }: { e: EventCard }) {
             <span className="truncate">{e.venue}</span>
           </div>
           <div className="mt-3 flex items-center justify-between">
-            <span className="rounded-full bg-white/15 px-3 py-1.5 text-[13px] font-semibold backdrop-blur">
-              <Price e={e} />
-            </span>
+            {e.access === "none" && !e.entryInfo ? <span /> : (
+              <span className="rounded-full bg-white/15 px-3 py-1.5 text-[13px] font-semibold backdrop-blur">
+                <Price e={e} />
+              </span>
+            )}
             {e.attendees > 0 && (
               <span className="flex items-center gap-1 text-xs text-white/75">
                 <Users className="size-3.5" />
@@ -64,7 +67,13 @@ export function TileCard({ e, wide }: { e: EventCard; wide?: boolean }) {
       <div className="mt-2.5 px-0.5">
         <div className="line-clamp-1 font-display text-[16px] font-bold">{e.title}</div>
         <div className="mt-0.5 line-clamp-1 text-[13px] text-muted">
-          {e.venue} · <Price e={e} />
+          {e.venue}
+          {(e.access !== "none" || e.entryInfo) && (
+            <>
+              {" · "}
+              <Price e={e} />
+            </>
+          )}
         </div>
       </div>
     </Link>

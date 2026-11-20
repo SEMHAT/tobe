@@ -18,6 +18,8 @@ import {
   Check,
   Ticket,
   Users,
+  DoorOpen,
+  ExternalLink,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { askNotifications } from "../components/AppPrompts";
@@ -69,7 +71,7 @@ export function EventPage() {
 
   const share = async () => {
     const url = shareUrl(`/evenement/${e.slug}`) + (e.visibility === "private" && e.accessCode ? `?code=${e.accessCode}` : "");
-    const text = `${e.title} — ${longDate(e.startsAt)} à ${time(e.startsAt)}, ${e.venue}. Infos et billets sur ToBe :`;
+    const text = `${e.title} — ${longDate(e.startsAt)} à ${time(e.startsAt)}, ${e.venue}. ${e.access === "none" ? "Infos" : "Infos et billets"} sur ToBe :`;
     if (navigator.share) {
       try {
         await navigator.share({ title: e.title, text, url });
@@ -134,7 +136,7 @@ export function EventPage() {
           <InfoRow icon={<Users className="size-5" />} title={e.attendees ? `${compact(e.attendees)} participant${e.attendees > 1 ? "s" : ""}` : "Soyez parmi les premiers"} sub={`${compact(e.expectedAttendance)} attendus`} />
         </div>
 
-        {!ended && <RemindCard e={e} />}
+        {!ended && e.access !== "none" && <RemindCard e={e} />}
 
         <div className="mt-5 flex items-center gap-3 rounded-2xl border border-line bg-card p-3">
           <Avatar name={e.organizerName} size={42} />
@@ -186,6 +188,19 @@ export function EventPage() {
                 ))}
               </div>
             )}
+            {e.access === "none" && (e.entryInfo || e.entryUrl) && (
+              <div className="rounded-2xl border border-line bg-card p-4">
+                <div className="flex items-center gap-2 font-display font-bold">
+                  <DoorOpen className="size-5 text-brand" /> Entrée
+                </div>
+                {e.entryInfo && <p className="mt-1.5 whitespace-pre-line text-[15px] text-ink/85">{e.entryInfo}</p>}
+                {e.entryUrl && (
+                  <a href={e.entryUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-brand px-5 text-sm font-semibold text-white">
+                    <ExternalLink className="size-4" /> Voir le lien de l'organisateur
+                  </a>
+                )}
+              </div>
+            )}
             {e.lat !== null && e.lng !== null && <EventMap points={[{ id: e.id, lat: e.lat, lng: e.lng, title: e.title, sub: e.venue, link: "" }]} height={190} zoom={15} interactive={false} />}
             <TobeUpsell />
           </div>
@@ -228,6 +243,7 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
         Retrouver mes photos
       </Button>
     );
+  if (e.access === "none") return <NoTicketAction e={e} />;
   return (
     <div className="flex items-center gap-4">
       <div className="shrink-0">
@@ -236,6 +252,33 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
       </div>
       <Button full size="lg" icon={<Ticket className="size-5" />} onClick={() => nav(`/evenement/${e.slug}/billets`)}>
         {e.access === "paid" ? "Prendre mon billet" : e.access === "invite" ? "Confirmer ma présence" : "Réserver ma place"}
+      </Button>
+    </div>
+  );
+}
+
+/** Événement sans billetterie ToBe : lien de l'organisateur, sinon simple rappel. */
+function NoTicketAction({ e }: { e: EventView }) {
+  const r = useReminder(e);
+  if (e.entryUrl)
+    return (
+      <div className="flex items-center gap-3">
+        <Button size="lg" variant="outline" loading={r.busy} onClick={r.toggle} icon={r.following ? <BellRing className="size-5" /> : <Bell className="size-5" />} className="shrink-0" aria-label={r.following ? "Rappels activés" : "Me rappeler"}>
+          <span className="hidden sm:inline">{r.following ? "Rappels activés" : "Me rappeler"}</span>
+        </Button>
+        <a href={e.entryUrl} target="_blank" rel="noopener noreferrer" className="flex h-14 flex-1 items-center justify-center gap-2 rounded-full bg-brand font-semibold text-white">
+          <ExternalLink className="size-5" /> Infos d'entrée
+        </a>
+      </div>
+    );
+  return (
+    <div className="flex items-center gap-4">
+      <div className="min-w-0 shrink">
+        <div className="text-xs text-muted">Entrée</div>
+        <div className="line-clamp-1 font-display font-bold">{e.entryInfo ? "Voir les infos" : "Gérée par l'organisateur"}</div>
+      </div>
+      <Button full size="lg" variant={r.following ? "outline" : "gold"} loading={r.busy} onClick={r.toggle} icon={r.following ? <BellRing className="size-5" /> : <Bell className="size-5" />}>
+        {r.following ? "Rappels activés" : "Me rappeler"}
       </Button>
     </div>
   );

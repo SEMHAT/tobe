@@ -238,12 +238,18 @@ export function OrganizerEvent() {
           </div>
         )}
 
-        {acc.stats && <><div className="mt-4 grid grid-cols-2 gap-3">
+        {acc.stats && <>{ev.access === "none" ? (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <Stat label="Vues" value={compact(r.views)} sub={`Score d'impact ${ev.impact.score}/100`} />
+            <Stat label="Rappels activés" value={compact(ev.followers ?? 0)} sub="personnes intéressées" />
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-3">
           <Stat label="Billets vendus" value={compact(r.sold)} sub={r.capacity ? `sur ${compact(r.capacity)}` : undefined} />
           <Stat label={payments ? "Recettes billets" : "Billets à encaisser"} value={formatFcfa(r.ticketRevenue)} sub={payments ? "versées après l'événement" : "payés à l'entrée"} />
           <Stat label="Entrées scannées" value={`${r.scanned}/${r.sold}`} />
           <Stat label="Vues" value={compact(r.views)} sub={`Score d'impact ${ev.impact.score}/100`} />
-        </div>
+        </div>)}
         {r.capacity > 0 && (
           <div className="mt-3">
             <Progress value={fill} />
@@ -266,7 +272,7 @@ export function OrganizerEvent() {
 
         <h2 className="mb-3 mt-6 text-base font-bold">Actions</h2>
         <div className="grid grid-cols-2 gap-3">
-          {acc.scan && <Action icon={<ScanLine />} label="Scanner les billets" sub={r.scanned ? `${r.scanned} entrée(s)` : undefined} onClick={() => nav(`/scanner?event=${ev.id}`)} />}
+          {acc.scan && ev.access !== "none" && <Action icon={<ScanLine />} label="Scanner les billets" sub={r.scanned ? `${r.scanned} entrée(s)` : undefined} onClick={() => nav(`/scanner?event=${ev.id}`)} />}
           {acc.photos && <Action icon={<ImagePlus />} label="Déposer les photos" sub={`${r.photos} en ligne`} onClick={() => setPhotosOpen(true)} />}
           {acc.edit && credits > 0 && (
             <Action

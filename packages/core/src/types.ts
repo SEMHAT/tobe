@@ -14,7 +14,8 @@ export type Category =
   | "autre";
 
 export type Visibility = "public" | "unlisted" | "private";
-export type Access = "free" | "paid" | "invite";
+/** `none` : pas de billetterie sur ToBe (l'organisateur gère l'entrée autrement). */
+export type Access = "free" | "paid" | "invite" | "none";
 export type Reach = "quartier" | "ville" | "national" | "international";
 export type ImpactTier = "local" | "ville" | "majeur" | "phare";
 export type PayMethod = "mixx" | "moov" | "card" | "cash";
@@ -87,6 +88,9 @@ export interface TobeEvent {
   theme: Theme;
   visibility: Visibility;
   access: Access;
+  /** Sans billetterie : comment entrer (texte libre) et lien externe éventuel. */
+  entryInfo?: string | null;
+  entryUrl?: string | null;
   accessCode: string | null;
   invitees: string[]; // e-mails autorisés pour un événement privé
   ticketTypes: TicketType[];

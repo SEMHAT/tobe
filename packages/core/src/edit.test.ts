@@ -83,3 +83,36 @@ test("modifier la date ou le lieu prévient les participants et recale les rappe
   assert.ok(svc.notifications(fan.id).some((n) => n.title === "Changement : Concret Live"));
   assert.deepEqual(db.reminders.all()[0].sent, [], "les rappels repartent de zéro pour la nouvelle date");
 });
+
+test("événement sans billetterie : infos d'entrée, pas de billets, rappels possibles", () => {
+  const { svc, orga, login } = setup();
+  const v = svc.createEvent(orga.id, {
+    title: "Mariage Kossi & Afi",
+    category: "mariage",
+    startsAt: "2026-12-12T15:00:00Z",
+    venue: "Hôtel 2 Février",
+    description: "",
+    visibility: "public",
+    access: "none",
+    entryInfo: "Entrée sur carton d'invitation",
+    entryUrl: "wa.me/22890123456",
+    expectedAttendance: 300,
+    reach: "ville",
+    options: {} as never,
+  });
+  assert.equal(v.access, "none");
+  assert.equal(v.ticketTypes.length, 0);
+  assert.equal(v.entryInfo, "Entrée sur carton d'invitation");
+  assert.equal(v.entryUrl, "https://wa.me/22890123456");
+  const card = svc.listEvents({}).find((c) => c.id === v.id)!;
+  assert.equal(card.access, "none");
+  assert.equal(card.entryInfo, "Entrée sur carton d'invitation");
+  const fan = login("fan@exemple.tg", "Fan");
+  assert.throws(() => svc.buyTickets(fan.id, v.id, { ticketTypeId: "x", qty: 1, method: "cash" }), /Pas de billetterie/);
+  // Passer ensuite à une billetterie gratuite, puis revenir : possible tant que rien n'est réservé.
+  const f = svc.updateEvent(orga.id, v.id, { access: "free", ticketTypes: [{ name: "Entrée", price: 0, quota: 100 }] });
+  assert.equal(f.ticketTypes.length, 1);
+  assert.equal(f.entryInfo, null);
+  svc.buyTickets(fan.id, v.id, { ticketTypeId: f.ticketTypes[0].id, qty: 1, method: "cash" });
+  assert.throws(() => svc.updateEvent(orga.id, v.id, { access: "none" }), ApiError);
+});

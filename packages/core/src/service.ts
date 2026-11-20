@@ -82,6 +82,7 @@ export interface EventCard {
   cover: string | null;
   theme: Theme;
   access: Access;
+  entryInfo: string | null;
   visibility: Visibility;
   priceFrom: number;
   impact: Impact;
@@ -107,6 +108,7 @@ export interface EventView extends Omit<TobeEvent, "accessCode" | "invitees"> {
   canPhotos: boolean;
   /** L'utilisateur a demandé un rappel. */
   following: boolean;
+  followers: number;
 }
 
 export interface CandidateView extends Candidate {
@@ -146,6 +148,8 @@ export interface EditEventInput {
   reach?: Reach | null;
   program?: { time: string; label: string }[];
   liveUrl?: string | null;
+  entryInfo?: string | null;
+  entryUrl?: string | null;
   options?: Partial<EventOptions>;
 }
 
@@ -171,6 +175,8 @@ export interface CreateEventInput {
   reach: Reach;
   options: EventOptions;
   liveUrl?: string | null;
+  entryInfo?: string | null;
+  entryUrl?: string | null;
   contest?: {
     title?: string;
     mode: Contest["mode"];
@@ -186,6 +192,24 @@ export interface CreateEventInput {
 }
 
 const DAY = 86_400_000;
+
+function cleanText(v: unknown, max: number): string | null {
+  const t = String(v ?? "").trim().slice(0, max);
+  return t || null;
+}
+
+/** Lien externe accepté seulement en http(s). */
+function cleanUrl(v: unknown): string | null {
+  let t = String(v ?? "").trim();
+  if (!t) return null;
+  if (!/^https?:\/\//i.test(t)) t = `https://${t}`;
+  try {
+    const u = new URL(t);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href.slice(0, 500) : null;
+  } catch {
+    throw new ApiError(400, "Le lien d'entrée n'est pas valide");
+  }
+}
 
 export interface ClientError {
   message: string;
@@ -434,6 +458,7 @@ export class ToBeService {
       cover: e.cover,
       theme: e.theme,
       access: e.access,
+      entryInfo: e.access === "none" ? (e.entryInfo ?? null) : null,
       visibility: e.visibility,
       priceFrom: e.access === "paid" && prices.length ? Math.min(...prices) : 0,
       impact: computeImpact(e),
@@ -557,6 +582,7 @@ export class ToBeService {
       myRole: acc.role,
       canScan: acc.scan,
       canPhotos: acc.photos,
+      followers: new Set(this.db.reminders.filter((r) => r.eventId === ev.id).map((r) => r.userId ?? r.subId ?? r.id)).size,
       following: user ? this.db.reminders.some((r) => r.eventId === ev.id && r.userId === user.id) : false,
       attendees: this.attendees(ev),
       photoCount: this.db.photos.filter((p) => p.eventId === ev.id).length,
@@ -577,8 +603,11 @@ export class ToBeService {
     const id = newId("evt");
     let slug = slugify(title) || "evenement";
     if (this.db.events.find((x) => x.slug === slug)) slug = `${slug}-${randomCode(4).toLowerCase()}`;
+    if (!["free", "paid", "invite", "none"].includes(input.access)) throw new ApiError(400, "Type d'accès inconnu");
     const ticketTypes =
-      input.access === "paid"
+      input.access === "none"
+        ? []
+        : input.access === "paid"
         ? (input.ticketTypes ?? []).filter((t) => t.name.trim()).map((t) => ({ id: newId("tkt"), name: t.name.trim(), price: Math.max(0, Math.round(t.price)), quota: Math.max(0, t.quota ?? 0), sold: 0 }))
         : [{ id: newId("tkt"), name: input.access === "invite" ? "Invitation" : "Entrée libre", price: 0, quota: Math.max(0, input.ticketTypes?.[0]?.quota ?? 0), sold: 0 }];
 
@@ -601,6 +630,8 @@ export class ToBeService {
       theme: input.theme ?? "or",
       visibility: input.visibility,
       access: input.access,
+      entryInfo: input.access === "none" ? cleanText(input.entryInfo, 300) : null,
+      entryUrl: input.access === "none" ? cleanUrl(input.entryUrl) : null,
       accessCode: input.visibility === "private" ? (input.accessCode?.trim().toUpperCase() || randomCode(6)) : null,
       invitees: (input.invitees ?? []).map((p) => {
         try {
@@ -717,11 +748,23 @@ export class ToBeService {
     const soldPaid = e.ticketTypes.some((t) => t.sold > 0 && t.price > 0);
     const access = patch.access ?? e.access;
     if (access !== e.access && soldPaid) throw new ApiError(400, "Des billets payants sont déjà réservés : vous ne pouvez plus changer le type d'accès");
+    if (!["free", "paid", "invite", "none"].includes(access)) throw new ApiError(400, "Type d'accès inconnu");
+    const booked = e.ticketTypes.reduce((n, t) => n + t.sold, 0);
+    if (access === "none" && e.access !== "none" && booked) throw new ApiError(400, `${booked} place(s) déjà réservée(s) sur ToBe : la billetterie ne peut plus être retirée`);
     if (patch.access !== undefined) next.access = access;
+    if (access === "none") {
+      if (patch.entryInfo !== undefined) next.entryInfo = cleanText(patch.entryInfo, 300);
+      if (patch.entryUrl !== undefined) next.entryUrl = cleanUrl(patch.entryUrl);
+    } else {
+      next.entryInfo = null;
+      next.entryUrl = null;
+    }
     if (patch.ticketTypes !== undefined || access !== e.access) {
       const wanted = (patch.ticketTypes ?? []).filter((t) => String(t.name ?? "").trim() || t.id);
       let types: TobeEvent["ticketTypes"];
-      if (access === "paid") {
+      if (access === "none") {
+        types = [];
+      } else if (access === "paid") {
         types = wanted.map((t) => {
           const old = t.id ? e.ticketTypes.find((x) => x.id === t.id) : undefined;
           const name = String(t.name ?? "").trim() || old?.name || "Billet";
@@ -802,6 +845,7 @@ export class ToBeService {
     const e = this.findEvent(idOrSlug);
     if (!this.canView(e, user, input.code)) throw new ApiError(403, "Accès réservé aux invités");
     if (!this.isUpcoming(e)) throw new ApiError(400, "Cet événement est terminé");
+    if (e.access === "none") throw new ApiError(400, "Pas de billetterie ToBe pour cet événement : voyez les infos d'entrée de l'organisateur");
     const tt = e.ticketTypes.find((t) => t.id === input.ticketTypeId);
     if (!tt) throw new ApiError(400, "Type de billet introuvable");
     const qty = Math.round(input.qty);

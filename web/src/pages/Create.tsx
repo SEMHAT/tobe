@@ -23,6 +23,7 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PayPicker } from "../components/pay";
+import { EntryFields, TicketingChoice } from "../components/Ticketing";
 import { Button, Field, Segmented, Sheet, Toggle, TopBar, cx, inputCls } from "../components/ui";
 import { Avatar, CategoryIcon, Poster, THEMES, TierBadge } from "../components/visual";
 import { api, uploadImage } from "../lib/api";
@@ -67,6 +68,9 @@ export function Create() {
   const [invitees, setInvitees] = useState("");
   // Étape 3
   const [access, setAccess] = useState<Access>("paid");
+  const [lastTicketAccess, setLastTicketAccess] = useState<Access>("paid");
+  const [entryInfo, setEntryInfo] = useState("");
+  const [entryUrl, setEntryUrl] = useState("");
   const [tickets, setTickets] = useState([{ name: "Standard", price: 5000, quota: 0 }]);
   const [capacity, setCapacity] = useState(0);
   const [expected, setExpected] = useState(200);
@@ -149,7 +153,9 @@ export function Create() {
         access,
         accessCode: accessCode || null,
         invitees: invitees.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean),
-        ticketTypes: access === "paid" ? tickets : [{ name: "Entrée", price: 0, quota: capacity }],
+        ticketTypes: access === "none" ? [] : access === "paid" ? tickets : [{ name: "Entrée", price: 0, quota: capacity }],
+        entryInfo: access === "none" ? entryInfo : null,
+        entryUrl: access === "none" ? entryUrl : null,
         expectedAttendance: expected,
         reach,
         options: { votes, cagnotte, gallery, live },
@@ -273,8 +279,13 @@ export function Create() {
 
         {step === 2 && (
           <>
-            <Segmented value={access} onChange={setAccess} options={[{ value: "free", label: "Gratuit" }, { value: "paid", label: "Payant" }, { value: "invite", label: "Invitation" }]} />
-            {access === "paid" ? (
+            <TicketingChoice on={access !== "none"} onChange={(on) => (on ? setAccess(lastTicketAccess) : (setLastTicketAccess(access === "none" ? lastTicketAccess : access), setAccess("none")))} />
+            {access === "none" ? (
+              <EntryFields info={entryInfo} setInfo={setEntryInfo} url={entryUrl} setUrl={setEntryUrl} />
+            ) : (
+              <Segmented value={access} onChange={setAccess} options={[{ value: "free", label: "Gratuit" }, { value: "paid", label: "Payant" }, { value: "invite", label: "Invitation" }]} />
+            )}
+            {access === "none" ? null : access === "paid" ? (
               <div className="space-y-3">
                 {tickets.map((t, i) => (
                   <div key={i} className="rounded-2xl border border-line bg-card p-3.5">

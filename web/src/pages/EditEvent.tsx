@@ -3,6 +3,7 @@ import { AlertTriangle, CalendarClock, Check, Globe2, ImagePlus, Link2, ListOrde
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button, ErrorState, Field, PageLoader, Segmented, TopBar, cx, inputCls } from "../components/ui";
+import { EntryFields, TicketingChoice } from "../components/Ticketing";
 import { CategoryIcon, Poster, THEMES } from "../components/visual";
 import { api, uploadImage } from "../lib/api";
 import { CATEGORY_LABELS, formatFcfa, toLocalInput } from "../lib/format";
@@ -71,7 +72,10 @@ function EditForm({ ev }: { ev: EventView }) {
   const [accessCode, setAccessCode] = useState(ev.accessCode ?? "");
   const [invitees, setInvitees] = useState((ev.invitees ?? []).join("\n"));
   const [access, setAccess] = useState<Access>(ev.access);
-  const [tickets, setTickets] = useState<TicketRow[]>(ev.ticketTypes.map((t) => ({ id: t.id, name: t.name, price: t.price, quota: t.quota, sold: t.sold })));
+  const [lastTicketAccess, setLastTicketAccess] = useState<Access>(ev.access === "none" ? "free" : ev.access);
+  const [entryInfo, setEntryInfo] = useState(ev.entryInfo ?? "");
+  const [entryUrl, setEntryUrl] = useState(ev.entryUrl ?? "");
+  const [tickets, setTickets] = useState<TicketRow[]>(ev.access === "paid" ? ev.ticketTypes.map((t) => ({ id: t.id, name: t.name, price: t.price, quota: t.quota, sold: t.sold })) : [{ name: "Standard", price: 5000, quota: 0, sold: 0 }]);
   const [capacity, setCapacity] = useState(ev.access === "paid" ? 0 : (ev.ticketTypes[0]?.quota ?? 0));
   const [expected, setExpected] = useState(ev.expectedAttendance);
   const [reach, setReach] = useState<Reach>(ev.reach);
@@ -98,8 +102,10 @@ function EditForm({ ev }: { ev: EventView }) {
       placeChanged ||
       visibility !== ev.visibility ||
       access !== ev.access ||
+      entryInfo !== (ev.entryInfo ?? "") ||
+      entryUrl !== (ev.entryUrl ?? "") ||
       JSON.stringify(tickets.map(({ name, price, quota }) => [name, price, quota])) !== JSON.stringify(ev.ticketTypes.map((t) => [t.name, t.price, t.quota])),
-    [title, description, category, cover, dateChanged, placeChanged, visibility, access, tickets, ev],
+    [title, description, category, cover, dateChanged, placeChanged, visibility, access, entryInfo, entryUrl, tickets, ev],
   );
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
@@ -151,7 +157,9 @@ function EditForm({ ev }: { ev: EventView }) {
         accessCode: visibility === "private" ? accessCode || null : null,
         invitees: invitees.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean),
         access,
-        ticketTypes: access === "paid" ? tickets.map(({ id, name, price, quota }) => ({ id, name, price, quota })) : [{ id: ev.ticketTypes[0]?.id, name: "Entrée", price: 0, quota: capacity }],
+        entryInfo: access === "none" ? entryInfo : null,
+        entryUrl: access === "none" ? entryUrl : null,
+        ticketTypes: access === "none" ? [] : access === "paid" ? tickets.map(({ id, name, price, quota }) => ({ id, name, price, quota })) : [{ id: ev.ticketTypes[0]?.id, name: "Entrée", price: 0, quota: capacity }],
         expectedAttendance: expected,
         reach,
         program: program.filter((p) => p.label.trim()),
@@ -256,13 +264,24 @@ function EditForm({ ev }: { ev: EventView }) {
             )}
           </Section>
 
-          <Section icon={<Ticket />} title="Billets et prix">
-            {soldPaid ? (
+          <Section icon={<Ticket />} title="Billetterie et prix">
+            <TicketingChoice
+              on={access !== "none"}
+              locked={sold > 0}
+              onChange={(on) => {
+                if (on) return setAccess(lastTicketAccess);
+                if (access !== "none") setLastTicketAccess(access);
+                setAccess("none");
+              }}
+            />
+            {access === "none" ? (
+              <EntryFields info={entryInfo} setInfo={setEntryInfo} url={entryUrl} setUrl={setEntryUrl} />
+            ) : soldPaid ? (
               <p className="rounded-2xl bg-card-2 p-3 text-sm text-muted">Des billets sont déjà réservés : le type d'accès ({access === "paid" ? "payant" : access === "free" ? "gratuit" : "sur invitation"}) ne peut plus changer.</p>
             ) : (
               <Segmented value={access} onChange={setAccess} options={[{ value: "free", label: "Gratuit" }, { value: "paid", label: "Payant" }, { value: "invite", label: "Invitation" }]} />
             )}
-            {access === "paid" ? (
+            {access === "none" ? null : access === "paid" ? (
               <div className="space-y-3">
                 {tickets.map((t, i) => (
                   <div key={t.id ?? `new-${i}`} className="rounded-2xl border border-line bg-card-2 p-3.5">
