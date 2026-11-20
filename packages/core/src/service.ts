@@ -75,6 +75,8 @@ export interface EventCard {
   title: string;
   category: Category;
   startsAt: string;
+  /** Fin annoncée (null : l'événement dure une soirée). Sert à afficher « En cours ». */
+  endsAt: string | null;
   venue: string;
   city: string;
   lat: number | null;
@@ -454,6 +456,7 @@ export class ToBeService {
       title: e.title,
       category: e.category,
       startsAt: e.startsAt,
+      endsAt: e.endsAt ?? null,
       venue: e.venue,
       city: e.city,
       lat: e.lat,
@@ -504,9 +507,11 @@ export class ToBeService {
       } else if (filters.when === "month") {
         to = from + 31 * DAY;
       }
+      // Un événement sur plusieurs jours (foire, semaine…) compte tant qu'il est en cours sur la période.
       list = list.filter((e) => {
         const t = new Date(e.startsAt).getTime();
-        return t >= from && t < to;
+        const end = e.endsAt ? new Date(e.endsAt).getTime() : t + 8 * 3600_000;
+        return t < to && end >= from;
       });
     }
     const cards = list.map((e) => this.toCard(e));

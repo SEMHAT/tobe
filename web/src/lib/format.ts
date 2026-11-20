@@ -13,6 +13,20 @@ export function shortDate(iso: string) {
   if (diff === 1) return `Demain · ${t}`;
   return `${cap(dayFmt.format(d))} · ${t}`;
 }
+/** Commencé mais pas fini (fin annoncée, ou 8 h après le début par défaut). */
+export function isOngoing(e: { startsAt: string; endsAt?: string | null }, now = Date.now()) {
+  const start = new Date(e.startsAt).getTime();
+  const end = e.endsAt ? new Date(e.endsAt).getTime() : start + 8 * 3_600_000;
+  return start <= now && end >= now;
+}
+/** « En cours · jusqu'au 22 nov. » ou la date habituelle. */
+export function cardDate(e: { startsAt: string; endsAt?: string | null }) {
+  if (!isOngoing(e)) return shortDate(e.startsAt);
+  if (!e.endsAt) return "En cours";
+  const end = new Date(e.endsAt);
+  const sameDay = new Date(end).setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+  return sameDay ? `En cours · jusqu'à ${timeFmt.format(end)}` : `En cours · jusqu'au ${new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" }).format(end)}`;
+}
 export function longDate(iso: string) {
   return cap(longFmt.format(new Date(iso)));
 }
