@@ -128,3 +128,27 @@ test("« Organisé par » : modifiable par l'équipe ToBe seulement", () => {
   assert.equal(b.organizerName, "Lix228");
   assert.equal(svc.updateEvent(staff.id, b.id, { organizerName: "Lix 228 Prod" }).organizerName, "Lix 228 Prod");
 });
+
+test("événement sur plusieurs jours : visible « aujourd'hui » tant qu'il est en cours", () => {
+  const { svc, orga, at } = setup();
+  const foire = svc.createEvent(orga.id, {
+    title: "Foire de la semaine",
+    category: "culture",
+    startsAt: "2026-11-16T08:00:00Z",
+    endsAt: "2026-11-22T18:00:00Z",
+    venue: "CETEF",
+    description: "Une semaine entière",
+    visibility: "public",
+    access: "free",
+    expectedAttendance: 2000,
+    reach: "ville",
+    options: {} as never,
+  } as never);
+  at("2026-11-20T10:00:00Z");
+  const today = svc.listEvents({ when: "today" });
+  const card = today.find((c) => c.id === foire.id);
+  assert.ok(card, "la foire commencée le 16 apparaît le 20");
+  assert.equal(card!.endsAt, "2026-11-22T18:00:00.000Z");
+  at("2026-11-23T10:00:00Z");
+  assert.ok(!svc.listEvents({ when: "today" }).some((c) => c.id === foire.id), "terminée : elle disparaît");
+});

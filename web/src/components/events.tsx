@@ -1,7 +1,7 @@
 import type { EventCard } from "@tobe/core";
 import { Calendar, Crown, HandCoins, MapPin, Users } from "lucide-react";
 import { Link } from "react-router-dom";
-import { compact, formatFcfa, shortDate, dayNum, monthShort } from "../lib/format";
+import { compact, formatFcfa, cardDate, isOngoing, dayNum, monthShort } from "../lib/format";
 import { cx } from "./ui";
 import { Poster, TierBadge } from "./visual";
 
@@ -24,7 +24,7 @@ export function HeroCard({ e }: { e: EventCard }) {
           {e.boosted && <span className="rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/75 backdrop-blur">Sponsorisé</span>}
         </div>
         <div className="absolute inset-x-4 bottom-4 text-white">
-          <div className="text-[13px] font-bold text-[#cfc9ff]">{shortDate(e.startsAt)}</div>
+          <div className="text-[13px] font-bold text-[#cfc9ff]">{cardDate(e)}</div>
           <div className="mt-1 font-display text-[22px] font-bold leading-tight">{e.title}</div>
           <div className="mt-1.5 flex items-center gap-1.5 text-[13px] text-white/75">
             <MapPin className="size-3.5" />
@@ -57,12 +57,19 @@ export function TileCard({ e, wide }: { e: EventCard; wide?: boolean }) {
         <div className="absolute left-3 top-3">
           <TierBadge tier={e.impact.tier} />
         </div>
-        <div className="absolute bottom-3 left-3 grid size-12 place-items-center rounded-2xl bg-white text-center leading-none text-[#16141c] shadow-lg">
-          <div>
-            <div className="font-display text-lg font-extrabold">{dayNum(e.startsAt)}</div>
-            <div className="text-[10px] font-bold text-coral">{monthShort(e.startsAt)}</div>
+        {isOngoing(e) ? (
+          <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[#16141c] shadow-lg">
+            <span className="size-2 rounded-full bg-emerald" aria-hidden="true" />
+            En cours
           </div>
-        </div>
+        ) : (
+          <div className="absolute bottom-3 left-3 grid size-12 place-items-center rounded-2xl bg-white text-center leading-none text-[#16141c] shadow-lg">
+            <div>
+              <div className="font-display text-lg font-extrabold">{dayNum(e.startsAt)}</div>
+              <div className="text-[10px] font-bold text-coral">{monthShort(e.startsAt)}</div>
+            </div>
+          </div>
+        )}
       </Poster>
       <div className="mt-2.5 px-0.5">
         <div className="line-clamp-1 font-display text-[16px] font-bold">{e.title}</div>
@@ -93,7 +100,7 @@ export function RowCard({ e }: { e: EventCard }) {
         <div className="mt-1 line-clamp-1 font-display text-[15px] font-bold">{e.title}</div>
         <div className="mt-0.5 flex items-center gap-1 text-[12.5px] text-muted">
           <Calendar className="size-3.5 shrink-0" />
-          <span className="truncate">{shortDate(e.startsAt)}</span>
+          <span className={cx("truncate", isOngoing(e) && "font-semibold text-emerald")}>{cardDate(e)}</span>
         </div>
         <div className="mt-0.5 line-clamp-1 text-[12.5px] font-semibold">
           <Price e={e} />
