@@ -70,6 +70,8 @@ export function Create() {
   const [access, setAccess] = useState<Access>("paid");
   const [lastTicketAccess, setLastTicketAccess] = useState<Access>("paid");
   const [entryInfo, setEntryInfo] = useState("");
+  const [organizerName, setOrganizerName] = useState("");
+  const agency = !!me?.team?.perms.includes("events.all");
   const [entryUrl, setEntryUrl] = useState("");
   const [tickets, setTickets] = useState([{ name: "Standard", price: 5000, quota: 0 }]);
   const [capacity, setCapacity] = useState(0);
@@ -155,6 +157,7 @@ export function Create() {
         invitees: invitees.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean),
         ticketTypes: access === "none" ? [] : access === "paid" ? tickets : [{ name: "Entrée", price: 0, quota: capacity }],
         entryInfo: access === "none" ? entryInfo : null,
+        ...(agency ? { organizerName } : {}),
         entryUrl: access === "none" ? entryUrl : null,
         expectedAttendance: expected,
         reach,
@@ -252,6 +255,11 @@ export function Create() {
                 <LocateFixed className="size-4" /> {geo ? "Placé" : "Ma position"}
               </button>
             </div>
+            {agency && (
+              <Field label="Organisé par (équipe ToBe)" hint="Nom de l'organisateur réel, affiché sur la page. Laissez vide pour afficher votre nom.">
+                <input className={inputCls} maxLength={80} placeholder="Ex. Lix228, CETEF, GDG Lomé" value={organizerName} onChange={(e) => setOrganizerName(e.target.value)} />
+              </Field>
+            )}
             <Field label="Description">
               <textarea className={`${inputCls} min-h-28`} placeholder="Ce qui attend les participants : artistes, programme, dress code…" value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>

@@ -150,6 +150,7 @@ export interface EditEventInput {
   liveUrl?: string | null;
   entryInfo?: string | null;
   entryUrl?: string | null;
+  organizerName?: string | null;
   options?: Partial<EventOptions>;
 }
 
@@ -177,6 +178,8 @@ export interface CreateEventInput {
   liveUrl?: string | null;
   entryInfo?: string | null;
   entryUrl?: string | null;
+  /** Équipe ToBe seulement : nom de l'organisateur réel affiché (« Organisé par »). */
+  organizerName?: string | null;
   contest?: {
     title?: string;
     mode: Contest["mode"];
@@ -615,7 +618,7 @@ export class ToBeService {
       id,
       slug,
       organizerId: user.id,
-      organizerName: user.name || "Organisateur",
+      organizerName: (input.organizerName?.trim() && this.team.can(user, "events.all") ? input.organizerName.trim().slice(0, 80) : "") || user.name || "Organisateur",
       title,
       category: input.category,
       startsAt: starts.toISOString(),
@@ -752,6 +755,7 @@ export class ToBeService {
     const booked = e.ticketTypes.reduce((n, t) => n + t.sold, 0);
     if (access === "none" && e.access !== "none" && booked) throw new ApiError(400, `${booked} place(s) déjà réservée(s) sur ToBe : la billetterie ne peut plus être retirée`);
     if (patch.access !== undefined) next.access = access;
+    if (patch.organizerName !== undefined && this.team.can(user, "events.all")) next.organizerName = patch.organizerName?.trim().slice(0, 80) || this.db.users.get(e.organizerId)?.name || "Organisateur";
     if (access === "none") {
       if (patch.entryInfo !== undefined) next.entryInfo = cleanText(patch.entryInfo, 300);
       if (patch.entryUrl !== undefined) next.entryUrl = cleanUrl(patch.entryUrl);

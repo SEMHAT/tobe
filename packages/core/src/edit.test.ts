@@ -116,3 +116,15 @@ test("événement sans billetterie : infos d'entrée, pas de billets, rappels po
   svc.buyTickets(fan.id, v.id, { ticketTypeId: f.ticketTypes[0].id, qty: 1, method: "cash" });
   assert.throws(() => svc.updateEvent(orga.id, v.id, { access: "none" }), ApiError);
 });
+
+test("« Organisé par » : modifiable par l'équipe ToBe seulement", () => {
+  const { svc, orga, login, db } = setup();
+  const base = { category: "concert" as const, startsAt: "2026-12-18T18:00:00Z", venue: "Palais", description: "", visibility: "public" as const, access: "none" as const, expectedAttendance: 100, reach: "ville" as const, options: {} as never };
+  const a = svc.createEvent(orga.id, { ...base, title: "Concert A", organizerName: "Lix228" });
+  assert.equal(a.organizerName, "Orga");
+  const staff = login("staff@exemple.tg", "Staff");
+  db.users.update(staff.id, { teamRole: "admin" });
+  const b = svc.createEvent(staff.id, { ...base, title: "Concert B", organizerName: "Lix228" });
+  assert.equal(b.organizerName, "Lix228");
+  assert.equal(svc.updateEvent(staff.id, b.id, { organizerName: "Lix 228 Prod" }).organizerName, "Lix 228 Prod");
+});

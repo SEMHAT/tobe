@@ -57,7 +57,7 @@ function Section({ icon, title, children }: { icon: ReactNode; title: string; ch
 
 function EditForm({ ev }: { ev: EventView }) {
   const nav = useNavigate();
-  const { toast } = useSession();
+  const { toast, me } = useSession();
   const [title, setTitle] = useState(ev.title);
   const [category, setCategory] = useState<Category>(ev.category);
   const [description, setDescription] = useState(ev.description);
@@ -74,6 +74,8 @@ function EditForm({ ev }: { ev: EventView }) {
   const [access, setAccess] = useState<Access>(ev.access);
   const [lastTicketAccess, setLastTicketAccess] = useState<Access>(ev.access === "none" ? "free" : ev.access);
   const [entryInfo, setEntryInfo] = useState(ev.entryInfo ?? "");
+  const [organizerName, setOrganizerName] = useState(ev.organizerName);
+  const agency = !!me?.team?.perms.includes("events.all");
   const [entryUrl, setEntryUrl] = useState(ev.entryUrl ?? "");
   const [tickets, setTickets] = useState<TicketRow[]>(ev.access === "paid" ? ev.ticketTypes.map((t) => ({ id: t.id, name: t.name, price: t.price, quota: t.quota, sold: t.sold })) : [{ name: "Standard", price: 5000, quota: 0, sold: 0 }]);
   const [capacity, setCapacity] = useState(ev.access === "paid" ? 0 : (ev.ticketTypes[0]?.quota ?? 0));
@@ -158,6 +160,7 @@ function EditForm({ ev }: { ev: EventView }) {
         invitees: invitees.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean),
         access,
         entryInfo: access === "none" ? entryInfo : null,
+        ...(agency ? { organizerName } : {}),
         entryUrl: access === "none" ? entryUrl : null,
         ticketTypes: access === "none" ? [] : access === "paid" ? tickets.map(({ id, name, price, quota }) => ({ id, name, price, quota })) : [{ id: ev.ticketTypes[0]?.id, name: "Entrée", price: 0, quota: capacity }],
         expectedAttendance: expected,
@@ -212,6 +215,11 @@ function EditForm({ ev }: { ev: EventView }) {
                 ))}
               </div>
             </Field>
+            {agency && (
+              <Field label="Organisé par (équipe ToBe)" hint="Nom de l'organisateur réel, affiché sur la page. Laissez vide pour afficher votre nom.">
+                <input className={inputCls} maxLength={80} placeholder="Ex. Lix228, CETEF, GDG Lomé" value={organizerName} onChange={(e) => setOrganizerName(e.target.value)} />
+              </Field>
+            )}
             <Field label="Description">
               <textarea className={`${inputCls} min-h-36`} value={description} onChange={(e) => setDescription(e.target.value)} />
             </Field>
