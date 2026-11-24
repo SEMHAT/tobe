@@ -5,6 +5,7 @@ import cors from "cors";
 import express, { type Request } from "express";
 import { createSasPay, handleApi, preVerify, runWithPayments, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
 import { ensureVapid, webPushSender } from "@tobe/core/src/node/webpush";
+import { proxiedFetch } from "@tobe/core/src/node/proxyFetch";
 import { config } from "./config";
 
 export function createApp(db: Db, opts: Partial<typeof config> = {}) {
@@ -23,7 +24,7 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   );
   // Webhook SasPay : corps brut conservé pour la signature.
   app.use(express.json({ limit: "4mb", verify: (req, _res, buf) => void ((req as Request & { rawBody?: string }).rawBody = buf.toString("utf8")) }));
-  const gateway = process.env.SASPAY_SECRET_KEY ? createSasPay({ secretKey: process.env.SASPAY_SECRET_KEY, baseUrl: process.env.SASPAY_BASE_URL || undefined }) : null;
+  const gateway = process.env.SASPAY_SECRET_KEY ? createSasPay({ secretKey: process.env.SASPAY_SECRET_KEY, baseUrl: process.env.SASPAY_BASE_URL || undefined, payoutFetcher: process.env.SASPAY_PROXY_URL ? proxiedFetch(process.env.SASPAY_PROXY_URL) : undefined }) : null;
 
   // Limite simple contre les abus sur l'envoi de codes : 5 demandes par adresse et par heure.
   const otpHits = new Map<string, number[]>();

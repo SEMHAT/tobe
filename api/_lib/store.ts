@@ -1,4 +1,5 @@
 import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
+import { proxiedFetch } from "../../packages/core/src/node/proxyFetch.js";
 import { COLLECTIONS, createDb, createSasPay, runWithPayments, type Gateway, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
@@ -167,7 +168,9 @@ let gatewayCache: { key: string; gw: Gateway } | null = null;
 export function gatewayFrom(env: Record<string, string | undefined>): Gateway | null {
   const key = env.SASPAY_SECRET_KEY?.trim();
   if (!key) return null;
-  if (gatewayCache?.key !== key) gatewayCache = { key, gw: createSasPay({ secretKey: key, baseUrl: env.SASPAY_BASE_URL || undefined }) };
+  const proxy = env.SASPAY_PROXY_URL || env.FIXIE_URL || env.QUOTAGUARDSTATIC_URL || "";
+  const cacheKey = `${key}|${proxy}`;
+  if (gatewayCache?.key !== cacheKey) gatewayCache = { key: cacheKey, gw: createSasPay({ secretKey: key, baseUrl: env.SASPAY_BASE_URL || undefined, payoutFetcher: proxy ? proxiedFetch(proxy) : undefined }) };
   return gatewayCache.gw;
 }
 

@@ -44,15 +44,15 @@ export function togoMsisdn(phone: string): string {
   return local;
 }
 
-export function createSasPay(opts: { secretKey: string; fetcher?: typeof fetch; baseUrl?: string }): Gateway {
+export function createSasPay(opts: { secretKey: string; fetcher?: typeof fetch; baseUrl?: string; /** Relais à IP fixe pour les reversements (IP déclarée chez SasPay). */ payoutFetcher?: typeof fetch }): Gateway {
   const sandbox = opts.secretKey.startsWith("sk_test_");
   const base = opts.baseUrl ?? (sandbox ? "https://sandbox-api.saspay.me/api/v1" : "https://api.saspay.me/api/v1");
   const f = opts.fetcher ?? fetch;
   let networks: { code: string; name: string; country: string }[] | null = null;
   let togoId: string | null = null;
 
-  async function call<T>(method: string, path: string, body?: unknown, idem?: string): Promise<T> {
-    const res = await f(`${base}${path}`, {
+  async function call<T>(method: string, path: string, body?: unknown, idem?: string, via?: typeof fetch): Promise<T> {
+    const res = await (via ?? f)(`${base}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${opts.secretKey}`,
@@ -147,6 +147,7 @@ export function createSasPay(opts: { secretKey: string; fetcher?: typeof fetch; 
           metadata: { source: "tobe" },
         },
         p.idempotencyKey,
+        opts.payoutFetcher,
       );
       return { id: r.id };
     },
