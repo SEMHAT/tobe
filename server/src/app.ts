@@ -50,6 +50,28 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
     res.json({ url: `/uploads/${name}` });
   });
   app.use("/uploads", express.static(cfg.uploadDir, { maxAge: "30d", immutable: true }));
+  // Documents privés : hors du dossier public, lisibles par leur auteur et les modérateurs.
+  const privDir = path.join(cfg.uploadDir, "..", "private");
+  fs.mkdirSync(privDir, { recursive: true });
+  app.post("/api/private-files", express.raw({ type: ["image/jpeg", "image/png", "image/webp"], limit: "3mb" }), (req, res) => {
+    const u = svc.userFromToken(token(req));
+    if (!u) return void res.status(401).json({ error: "Connectez-vous pour envoyer un document" });
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return void res.status(400).json({ error: "Document manquant ou format non accepté" });
+    const id = `doc_${crypto.randomBytes(10).toString("hex")}`;
+    fs.writeFileSync(path.join(privDir, id), req.body);
+    fs.writeFileSync(path.join(privDir, `${id}.json`), JSON.stringify({ owner: u.id, mime: String(req.headers["content-type"]) }));
+    res.json({ id });
+  });
+  app.get("/api/private-files/:id", (req, res) => {
+    const u = svc.userFromToken(token(req));
+    if (!u) return void res.status(401).json({ error: "Connexion requise" });
+    const id = String(req.params.id);
+    if (!/^doc_[a-z0-9]+$/i.test(id) || !fs.existsSync(path.join(privDir, `${id}.json`))) return void res.status(404).json({ error: "Document introuvable" });
+    const meta = JSON.parse(fs.readFileSync(path.join(privDir, `${id}.json`), "utf8")) as { owner: string; mime: string };
+    if (meta.owner !== u.id && !svc.team.can(u, "providers.moderate")) return void res.status(403).json({ error: "Accès réservé à l'équipe ToBe" });
+    res.setHeader("cache-control", "private, no-store");
+    res.type(meta.mime).send(fs.readFileSync(path.join(privDir, id)));
+  });
 
   // Toute l'API passe par la même table de routes que le mode démo.
   app.use("/api", async (req, res) => {

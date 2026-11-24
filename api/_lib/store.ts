@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
 import { proxiedFetch } from "../../packages/core/src/node/proxyFetch.js";
 import { COLLECTIONS, createDb, createSasPay, runWithPayments, type Gateway, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
@@ -204,4 +205,54 @@ export function runApiWithPayments(
     { gateway: gatewayFrom(env), publicUrl: env.PUBLIC_URL || "https://tobe.eledji.com", webhookSecret: env.SASPAY_WEBHOOK_SECRET || null, raw },
     req,
   );
+}
+
+// ---------- Documents privés (pièces d'identité, preuves) : jamais publics ----------
+
+let filesReady: Promise<void> | null = null;
+function ensureFiles(pool: PgPool) {
+  filesReady ??= (async () => {
+    const c = await pool.connect();
+    try {
+      await c.query("CREATE TABLE IF NOT EXISTS private_files (id TEXT PRIMARY KEY, owner TEXT NOT NULL, mime TEXT NOT NULL, data BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())");
+    } finally {
+      c.release();
+    }
+  })().catch((e) => {
+    filesReady = null;
+    throw e;
+  });
+  return filesReady;
+}
+
+export async function savePrivateFile(pool: PgPool, owner: string, mime: string, data: Buffer) {
+  await ensureFiles(pool);
+  const id = `doc_${randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  const c = await pool.connect();
+  try {
+    await c.query("INSERT INTO private_files (id, owner, mime, data) VALUES ($1, $2, $3, $4)", [id, owner, mime, data]);
+  } finally {
+    c.release();
+  }
+  return id;
+}
+
+/** Le propriétaire ou un modérateur ToBe seulement. */
+export async function readPrivateFile(pool: PgPool, env: Record<string, string | undefined>, id: string, token: string | null) {
+  const userId = await sessionUser(pool, token);
+  if (!userId) return { status: 401 as const };
+  await ensureFiles(pool);
+  const c = await pool.connect();
+  let row: { owner: string; mime: string; data: Buffer } | undefined;
+  try {
+    row = (await c.query("SELECT owner, mime, data FROM private_files WHERE id = $1", [id])).rows[0];
+  } finally {
+    c.release();
+  }
+  if (!row) return { status: 404 as const };
+  if (row.owner !== userId) {
+    const mod = await runApi(pool, env, { method: "GET", path: "/admin/moderation", token });
+    if (mod.status !== 200) return { status: 403 as const };
+  }
+  return { status: 200 as const, mime: row.mime, data: row.data };
 }

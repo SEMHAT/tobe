@@ -106,6 +106,7 @@ function Footer() {
             <li><Link className="hover:text-ink" to="/explorer">Tous les événements</Link></li>
             <li><Link className="hover:text-ink" to="/explorer?when=weekend">Ce week-end</Link></li>
             <li><Link className="hover:text-ink" to="/photos">Pass ToBe</Link></li>
+            <li><Link className="hover:text-ink" to="/securite">Payer en toute sécurité</Link></li>
             <li><Link className="hover:text-ink" to="/club">ToBe Club : jouer et gagner</Link></li>
           </ul>
         </div>

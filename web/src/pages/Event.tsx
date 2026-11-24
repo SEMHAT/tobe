@@ -14,6 +14,8 @@ import {
   Share2,
   Pencil,
   ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
   Flag,
   Bell,
   BellRing,
@@ -162,6 +164,23 @@ export function EventPage() {
             )}
           </div>
         </div>
+
+        {!e.moderation &&
+          (e.eventVerified ? (
+            <Link to="/securite" className="mt-3 flex items-start gap-2.5 rounded-2xl border border-emerald/40 bg-emerald/5 p-3.5 text-sm">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald" />
+              <span>
+                <b className="text-emerald">Événement vérifié par ToBe.</b> L'organisateur et l'événement ont été contrôlés.{e.access === "paid" ? " Payez uniquement sur ToBe : votre billet est garanti." : ""}
+              </span>
+            </Link>
+          ) : (
+            <Link to="/securite" className="mt-3 flex items-start gap-2.5 rounded-2xl border border-line bg-card-2 p-3.5 text-sm">
+              <ShieldQuestion className="mt-0.5 size-5 shrink-0 text-muted" />
+              <span className="text-muted">
+                <b className="text-ink">Pas encore vérifié par ToBe.</b> {e.access === "paid" ? "La billetterie s'ouvre après vérification. " : ""}N'envoyez jamais d'argent directement à quelqu'un pour cet événement. <span className="font-semibold text-brand">Payer en toute sécurité</span>
+              </span>
+            </Link>
+          ))}
 
         {e.liveUrl && (
           <a href={e.liveUrl} target="_blank" rel="noreferrer" className="mt-3 flex items-center gap-3 rounded-2xl border border-coral/40 bg-coral/10 p-3.5 font-semibold text-coral">

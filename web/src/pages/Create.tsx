@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   X,
+  ShieldCheck,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -654,6 +655,14 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
             </Button>
           </Link>
         </div>
+        {!e.eventVerified && !e.moderation && (
+          <Link to={`/organisateur/${e.id}`} className="flex items-start gap-3 rounded-2xl border border-brand/30 bg-brand-soft/60 p-3.5 text-left text-sm dark:bg-brand/15">
+            <ShieldCheck className="mt-0.5 size-5 shrink-0 text-brand" />
+            <span>
+              <b>Faites vérifier votre événement.</b> Envoyez une preuve (contrat de salle, autorisation…) pour afficher le badge « Événement vérifié »{e.access === "paid" ? " et ouvrir la billetterie" : ""}.
+            </span>
+          </Link>
+        )}
         <Link to={`/organisateur/${e.id}/modifier`} className="block text-center text-sm font-semibold text-brand">
           Une erreur ? Modifier l'événement
         </Link>

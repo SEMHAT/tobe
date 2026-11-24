@@ -1,5 +1,5 @@
 import type { EventCard } from "@tobe/core";
-import { Calendar, Crown, HandCoins, MapPin, Users } from "lucide-react";
+import { Calendar, Crown, HandCoins, MapPin, ShieldCheck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { compact, formatFcfa, cardDate, isOngoing, dayNum, monthShort } from "../lib/format";
 import { cx } from "./ui";
@@ -21,6 +21,7 @@ export function HeroCard({ e }: { e: EventCard }) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
         <div className="absolute left-4 right-4 top-4 flex items-center justify-between">
           <TierBadge tier={e.impact.tier} />
+          {e.verified && <VerifiedDot />}
           {e.boosted && <span className="rounded-full bg-black/40 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/75 backdrop-blur">Sponsorisé</span>}
         </div>
         <div className="absolute inset-x-4 bottom-4 text-white">
@@ -56,6 +57,7 @@ export function TileCard({ e, wide }: { e: EventCard; wide?: boolean }) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         <div className="absolute left-3 top-3">
           <TierBadge tier={e.impact.tier} />
+          {e.verified && <VerifiedDot />}
         </div>
         {isOngoing(e) ? (
           <div className="absolute bottom-3 left-3 flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide text-[#16141c] shadow-lg">
@@ -94,6 +96,7 @@ export function RowCard({ e }: { e: EventCard }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <TierBadge tier={e.impact.tier} className="h-5 px-2 text-[10px]" />
+          {e.verified && <VerifiedDot small />}
           {e.hasVotes && <Crown className="size-4 text-brand" aria-label="Votes" />}
           {e.hasCagnotte && <HandCoins className="size-4 text-brand" aria-label="Cagnotte" />}
         </div>
@@ -124,5 +127,14 @@ export function SkeletonRows({ n = 4 }: { n?: number }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Pastille « vérifié par ToBe » sur les cartes d'événements. */
+function VerifiedDot({ small }: { small?: boolean }) {
+  return (
+    <span title="Événement vérifié par ToBe" className={`inline-flex items-center gap-1 rounded-full bg-emerald font-bold text-white ${small ? "h-5 px-1.5 text-[10px]" : "h-6 px-2 text-[11px]"}`}>
+      <ShieldCheck className={small ? "size-3" : "size-3.5"} /> Vérifié
+    </span>
   );
 }

@@ -38,7 +38,10 @@ test("organisateur non vérifié : événement publié mais ventes en ligne ferm
   assert.match(String(svc.getEvent(ev.id, fan.id).salesBlocked), /vérifié/);
   assert.throws(() => svc.buyTickets(fan.id, ev.id, { ticketTypeId: ev.ticketTypes[0].id, qty: 1, method: "online" }), (e: ApiError) => e.status === 403);
 
-  svc.requestVerification(orga.id, { fullName: "Kossi Mensah", phone: "90123456", orgName: "KM Events", link: "facebook.com/kmevents" });
+  // Sans pièce d'identité ni selfie : refusé.
+  assert.throws(() => svc.requestVerification(orga.id, { fullName: "Kossi Mensah", phone: "90123456", orgName: "KM Events" }), (e: ApiError) => e.status === 400);
+  assert.throws(() => svc.requestVerification(orga.id, { fullName: "Kossi Mensah", phone: "90123456", orgName: "KM Events", kind: "structure", idDocs: ["doc_a1"] }), /RCCM|structure/);
+  svc.requestVerification(orga.id, { fullName: "Kossi Mensah", phone: "90123456", orgName: "KM Events", link: "facebook.com/kmevents", kind: "person", idDocs: ["doc_cni1"], selfie: "doc_selfie1" });
   assert.equal(svc.moderationQueue(staff.id).verifications.length, 1);
   svc.reviewVerification(staff.id, orga.id, { decision: "verified" });
   assert.equal(svc.getEvent(ev.id, fan.id).salesBlocked, null);
@@ -82,22 +85,33 @@ test("3 signalements de visiteurs différents → mis en vérification", () => {
   assert.ok(!svc.listEvents({}).some((e) => e.id === ev.id));
 });
 
-test("validation de chaque publication : invisible jusqu'à l'accord de l'équipe ; l'équipe publie directement", () => {
+test("vérification de chaque événement : visible tout de suite, billetterie fermée jusqu'aux preuves validées", () => {
   const db = createDb();
-  const svc = new ToBeService(db, { exposeOtp: true, premoderation: true, adminEmails: ["staff@tobe.tg"] } as never);
+  const svc = new ToBeService(db, { exposeOtp: true, checkout: true, premoderation: true, adminEmails: ["staff@tobe.tg"] } as never);
   const login = (email: string, name: string) => svc.verifyOtp(email, (svc.requestOtp(email) as { devCode: string }).devCode, name).user;
   const staff = login("staff@tobe.tg", "Staff");
   db.users.update(staff.id, { teamRole: "super_admin" } as never);
   const orga = login("orga@exemple.tg", "Orga");
   const fan = login("fan@exemple.tg", "Fan");
-  const mk = (t: string) => ({ title: t, category: "soiree" as const, startsAt: new Date(Date.now() + 9 * 86400_000).toISOString(), venue: "Bar", description: "", visibility: "public" as const, access: "free" as const, ticketTypes: [{ name: "Entrée", price: 0, quota: 0 }], expectedAttendance: 50, reach: "quartier" as const, options: {} as never });
-  const e = svc.createEvent(orga.id, mk("Soirée salsa"));
-  assert.equal(e.moderation, "review");
-  assert.ok(!svc.listEvents({}).some((x) => x.id === e.id));
-  assert.throws(() => svc.getEvent(e.slug, fan.id), (x: ApiError) => x.status === 403);
-  assert.ok(svc.moderationQueue(staff.id).events.some((x) => x.id === e.id));
+  svc.requestVerification(orga.id, { fullName: "Afi Mensah", phone: "90123456", orgName: "AM Prod", kind: "structure", idDocs: ["doc_cni"], structureDocs: ["doc_rccm"], structureNumber: "TG-LOM 2024 B 1234" });
+  svc.reviewVerification(staff.id, orga.id, { decision: "verified" });
+  const mk = (t: string) => ({ title: t, category: "concert" as const, startsAt: new Date(Date.now() + 9 * 86400_000).toISOString(), venue: "Palais", description: "", visibility: "public" as const, access: "paid" as const, ticketTypes: [{ name: "Standard", price: 3000, quota: 0 }], expectedAttendance: 50, reach: "ville" as const, options: {} as never });
+  const e = svc.createEvent(orga.id, mk("Concert salsa"));
+  const card = svc.listEvents({}).find((x) => x.id === e.id)!;
+  assert.ok(card, "visible dans l'agenda");
+  assert.equal(card.verified, false);
+  const v = svc.getEvent(e.slug, fan.id);
+  assert.equal(v.eventVerified, false);
+  assert.match(String(v.salesBlocked), /vérifié cet événement/);
+  assert.deepEqual(v.proofs, [], "les preuves ne sont pas publiques");
+  assert.throws(() => svc.submitEventProof(fan.id, e.id, { files: [{ fileId: "doc_x", label: "Contrat" }] }), (x: ApiError) => x.status === 403);
+  svc.submitEventProof(orga.id, e.id, { files: [{ fileId: "doc_contrat", label: "Contrat de location de la salle" }], note: "Salle réservée" });
+  const q = svc.moderationQueue(staff.id).toVerify.find((x) => x.id === e.id)!;
+  assert.equal(q.proofs.length, 1);
   svc.moderateEvent(staff.id, e.id, { action: "approve" });
-  assert.ok(svc.listEvents({}).some((x) => x.id === e.id));
-  assert.equal(svc.getEvent(e.slug, fan.id).isOrganizer, false, "un visiteur ne peut pas modifier");
-  assert.equal(svc.createEvent(staff.id, mk("Soirée de l'équipe")).moderation, null);
+  const after = svc.getEvent(e.slug, fan.id);
+  assert.equal(after.eventVerified, true);
+  assert.equal(after.salesBlocked, null);
+  assert.equal(after.isOrganizer, false, "un visiteur ne peut pas modifier");
+  assert.equal(svc.createEvent(staff.id, mk("Soirée de l'équipe")).eventVerified, true, "l'équipe ToBe publie vérifié");
 });

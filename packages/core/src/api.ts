@@ -153,6 +153,7 @@ export const routes: Route[] = [
   // Garde-fous : vérification des organisateurs, signalements, modération.
   { method: "GET", path: "/me/verification", handler: (s, c) => s.myVerification(need(c)) },
   { method: "POST", path: "/me/verification", handler: (s, c) => s.requestVerification(need(c), c.body as never) },
+  { method: "POST", path: "/events/:id/proof", handler: (s, c) => s.submitEventProof(need(c), c.params.id, c.body as never) },
   { method: "POST", path: "/events/:id/report", handler: (s, c) => s.reportEvent(need(c), c.params.id, c.body as never) },
   { method: "GET", path: "/admin/moderation", handler: (s, c) => s.moderationQueue(need(c)) },
   { method: "POST", path: "/admin/verifications/:id", handler: (s, c) => s.reviewVerification(need(c), c.params.id, c.body as never) },

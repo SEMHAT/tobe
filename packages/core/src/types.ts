@@ -48,6 +48,16 @@ export interface User {
 
 export interface OrganizerVerification {
   status: "pending" | "verified" | "rejected";
+  /** Particulier (pièce d'identité + selfie) ou structure (document d'immatriculation + pièce du responsable). */
+  kind?: "person" | "structure";
+  /** Documents privés (identifiants de fichiers visibles seulement par l'équipe ToBe). */
+  idDocs?: string[];
+  selfie?: string | null;
+  structureDocs?: string[];
+  /** N° RCCM, récépissé d'association… */
+  structureNumber?: string;
+  /** Fonction dans la structure. */
+  role?: string;
   fullName: string;
   phone: string;
   orgName: string;
@@ -159,8 +169,12 @@ export interface TobeEvent {
   /** review : en vérification (doublon possible, signalements) · suspended : retiré par ToBe. Masqué et ventes fermées. */
   moderation?: "review" | "suspended" | null;
   moderationReason?: string | null;
-  /** Validé par ToBe : plus de contrôle automatique de doublon. */
+  /** Événement vérifié par ToBe (preuves contrôlées) : badge public et ventes ouvertes. */
   approvedAt?: string | null;
+  /** Preuves que l'organisateur organise bien cet événement (fichiers privés). */
+  proofs?: { fileId: string; label: string }[];
+  proofNote?: string | null;
+  proofSubmittedAt?: string | null;
   title: string;
   category: Category;
   startsAt: string;

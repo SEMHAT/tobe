@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { eventPath } from "../components/events";
 import { EarningsCard } from "../components/Earnings";
-import { VerificationCard } from "../components/Verification";
+import { EventProofCard, VerificationCard } from "../components/Verification";
 import { EventTeam } from "../components/TeamInvite";
 import { PayPicker } from "../components/pay";
 import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
@@ -226,6 +226,11 @@ export function OrganizerEvent() {
           </div>
           <TierBadge tier={ev.impact.tier} />
         </Link>
+        {acc.edit && (
+          <div className="mt-3">
+            <EventProofCard ev={ev} onDone={(v) => setEv(v)} />
+          </div>
+        )}
         {acc.edit && (
           <Link to={`/organisateur/${ev.id}/modifier`} className="mt-3 flex items-center gap-3 rounded-2xl border border-brand/30 bg-brand-soft/60 p-3.5 dark:bg-brand/15">
             <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white">

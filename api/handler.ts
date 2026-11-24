@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
-import { profilEledji, runApiWithPayments, sessionUser, type PgPool } from "./_lib/store.js";
+import { profilEledji, readPrivateFile, runApiWithPayments, savePrivateFile, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 
@@ -43,6 +43,27 @@ export default async function handler(req: Req, res: ServerResponse) {
       if (buf.length > 4_000_000) return send(res, 413, { error: "Image trop lourde (4 Mo maximum)" });
       const blob = await put(`uploads/${userId}/${Date.now().toString(36)}.${ext}`, buf, { access: "public", contentType: type, addRandomSuffix: true });
       return send(res, 200, { url: blob.url });
+    }
+
+    // Documents privés (pièce d'identité, preuves) : stockés en base, lisibles par leur auteur et l'équipe ToBe seulement.
+    if (sub === "private-files" && req.method === "POST") {
+      const userId = await sessionUser(pool, token);
+      if (!userId) return send(res, 401, { error: "Connectez-vous pour envoyer un document" });
+      const type = String(req.headers["content-type"] ?? "").split(";")[0];
+      if (!TYPES[type]) return send(res, 400, { error: "Format non accepté (photo JPEG, PNG ou WebP)" });
+      const buf = await rawBody(req);
+      if (!buf.length) return send(res, 400, { error: "Document manquant" });
+      if (buf.length > 3_000_000) return send(res, 413, { error: "Document trop lourd (3 Mo maximum)" });
+      return send(res, 200, { id: await savePrivateFile(pool, userId, type, buf) });
+    }
+    if (sub.startsWith("private-files/") && req.method === "GET") {
+      const r = await readPrivateFile(pool, process.env, sub.slice("private-files/".length), token);
+      if (r.status !== 200) return send(res, r.status, { error: r.status === 401 ? "Connexion requise" : r.status === 404 ? "Document introuvable" : "Accès réservé à l'équipe ToBe" });
+      res.statusCode = 200;
+      res.setHeader("content-type", r.mime);
+      res.setHeader("cache-control", "private, no-store");
+      res.setHeader("x-content-type-options", "nosniff");
+      return void res.end(r.data);
     }
 
     // Webhook SasPay : on garde le corps brut (signature), avant que Vercel ne le transforme.

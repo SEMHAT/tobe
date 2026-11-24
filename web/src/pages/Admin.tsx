@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { PrivateThumb } from "../components/DocInput";
 import type { ClientError, EventCard, Provider, TobeRequest } from "@tobe/core";
 import { Bug, Banknote, ShieldAlert, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
 import { useState } from "react";
@@ -614,7 +615,8 @@ function PaymentsAdmin() {
 
 interface ModEvent { id: string; slug: string; title: string; startsAt: string; organizerName: string; organizerVerified: boolean; moderation: "review" | "suspended" | null; reason: string | null; reports: number; paid: boolean }
 interface ModData {
-  verifications: { userId: string; email: string; events: number; fullName: string; phone: string; orgName: string; link: string; about: string; submittedAt: string }[];
+  verifications: { userId: string; email: string; events: number; fullName: string; phone: string; orgName: string; link: string; about: string; submittedAt: string; kind?: "person" | "structure"; idDocs?: string[]; selfie?: string | null; structureDocs?: string[]; structureNumber?: string; role?: string }[];
+  toVerify: (ModEvent & { proofs: { fileId: string; label: string }[]; proofNote: string | null; proofSubmittedAt: string | null; organizerRequest: string | null })[];
   events: ModEvent[];
   reports: { id: string; reason: string; details: string; createdAt: string; by: string; event: ModEvent | null }[];
   unverifiedSelling: ModEvent[];
@@ -644,7 +646,7 @@ function ModerationAdmin() {
     void run(api<ModData>("POST", `/admin/events/${id}/moderation`, { action, reason }), action === "approve" ? "Événement validé" : "Événement retiré, reversements bloqués");
   };
   const wa = (phone: string) => `https://wa.me/${phone.replace(/\D/g, "").length === 8 ? "228" : ""}${phone.replace(/\D/g, "")}`;
-  const total = data.verifications.length + data.events.length + data.reports.length;
+  const total = data.verifications.length + data.toVerify.filter((e) => e.proofs.length).length + data.events.length + data.reports.length;
   const Ev = ({ e }: { e: ModEvent }) => (
     <div className="rounded-2xl border border-line p-3 text-sm">
       <Link to={`/evenement/${e.slug}`} className="font-semibold underline-offset-2 hover:underline">
@@ -674,7 +676,7 @@ function ModerationAdmin() {
       <h2 className="flex items-center gap-2 font-display text-lg font-bold">
         <ShieldAlert className="size-5 text-brand" /> Garde-fous {total > 0 && <span className="rounded-full bg-coral px-2 py-0.5 text-xs text-white">{total}</span>}
       </h2>
-      <p className="mt-1 text-xs text-muted">Chaque nouvelle publication attend votre validation. Ici aussi : organisateurs à vérifier avant d'ouvrir leurs ventes, doublons possibles, signalements du public.</p>
+      <p className="mt-1 text-xs text-muted">Organisateurs à vérifier (documents privés), événements à vérifier avant d'ouvrir leur billetterie, doublons possibles, signalements du public.</p>
 
       <h3 className="mt-4 text-sm font-bold">Organisateurs à vérifier</h3>
       {data.verifications.length === 0 ? (
@@ -695,7 +697,19 @@ function ModerationAdmin() {
                 </a>
               )}
               {v.about && <p className="mt-1 text-xs">{v.about}</p>}
-              <p className="mt-2 text-xs text-muted">Appelez-le en vidéo sur WhatsApp : pièce d'identité, nom identique, page officielle à son nom.</p>
+              <div className="mt-1 text-xs">
+                {v.kind === "structure" ? `Structure · RCCM/récépissé ${v.structureNumber ?? "?"} · ${v.role || "fonction ?"}` : "Particulier"}
+              </div>
+              <div className="mt-2 flex gap-2 overflow-x-auto">
+                {(v.idDocs ?? []).map((d, i) => (
+                  <PrivateThumb key={d} id={d} label={i ? "Pièce (verso)" : "Pièce (recto)"} />
+                ))}
+                {v.selfie && <PrivateThumb id={v.selfie} label="Selfie avec la pièce" />}
+                {(v.structureDocs ?? []).map((d) => (
+                  <PrivateThumb key={d} id={d} label="Document structure" />
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted">Contrôlez : nom identique sur la pièce et le formulaire, visage du selfie, pièce en cours de validité, RCCM au nom de la structure. En cas de doute, appel vidéo WhatsApp.</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <a href={wa(v.phone)} target="_blank" rel="noreferrer" className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold">
                   WhatsApp {v.phone}
@@ -712,9 +726,51 @@ function ModerationAdmin() {
         </div>
       )}
 
+      <h3 className="mt-4 text-sm font-bold">Événements à vérifier</h3>
+      {data.toVerify.length === 0 ? (
+        <p className="text-sm text-muted">Aucun.</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {data.toVerify.map((e) => (
+            <div key={e.id} className="rounded-2xl border border-line p-3 text-sm">
+              <Link to={`/evenement/${e.slug}`} className="font-semibold underline-offset-2 hover:underline">
+                {e.title}
+              </Link>
+              <div className="text-xs text-muted">
+                {e.organizerName} · organisateur {e.organizerVerified ? "vérifié" : e.organizerRequest === "pending" ? "en attente de vérification" : "non vérifié"} · {e.startsAt.slice(0, 10)}
+                {e.paid ? " · payant" : ""}
+              </div>
+              {e.proofs.length ? (
+                <div className="mt-2 flex gap-2 overflow-x-auto">
+                  {e.proofs.map((p) => (
+                    <PrivateThumb key={p.fileId} id={p.fileId} label={p.label} />
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-muted">Aucune preuve envoyée pour l'instant.</div>
+              )}
+              {e.proofNote && <div className="mt-1 text-xs">« {e.proofNote} »</div>}
+              <div className="mt-2 flex gap-2">
+                <button
+                  disabled={e.paid && !e.organizerVerified}
+                  title={e.paid && !e.organizerVerified ? "Vérifiez d'abord l'organisateur" : undefined}
+                  className="rounded-full bg-emerald px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                  onClick={() => moderate(e.id, "approve")}
+                >
+                  Vérifier l'événement
+                </button>
+                <button className="rounded-full border border-coral px-3 py-1.5 text-xs font-semibold text-coral" onClick={() => moderate(e.id, "suspend")}>
+                  Retirer
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {data.events.length > 0 && (
         <>
-          <h3 className="mt-4 text-sm font-bold">Publications à valider et événements retirés</h3>
+          <h3 className="mt-4 text-sm font-bold">Doublons possibles et événements retirés</h3>
           <div className="mt-2 space-y-2">
             {data.events.map((e) => (
               <Ev key={e.id} e={e} />

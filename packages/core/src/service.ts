@@ -91,6 +91,7 @@ export interface EventCard {
   access: Access;
   entryInfo: string | null;
   moderation: "review" | "suspended" | null;
+  verified: boolean;
   visibility: Visibility;
   priceFrom: number;
   impact: Impact;
@@ -111,6 +112,9 @@ export interface EventView extends Omit<TobeEvent, "accessCode" | "invitees"> {
   myTickets: number;
   organizerPro: boolean;
   organizerVerified: boolean;
+  eventVerified: boolean;
+  proofs: { fileId: string; label: string }[];
+  proofSubmittedAt: string | null;
   /** Raison pour laquelle on ne peut pas acheter en ligne (null : ventes ouvertes). */
   salesBlocked: string | null;
   moderation: "review" | "suspended" | null;
@@ -484,6 +488,7 @@ export class ToBeService {
       access: e.access,
       entryInfo: e.access === "none" ? (e.entryInfo ?? null) : null,
       moderation: e.moderation ?? null,
+      verified: this.isEventVerified(e),
       visibility: e.visibility,
       priceFrom: e.access === "paid" && prices.length ? Math.min(...prices) : 0,
       impact: computeImpact(e),
@@ -618,6 +623,9 @@ export class ToBeService {
       photoCount: this.db.photos.filter((p) => p.eventId === ev.id).length,
       organizerPro: !!this.db.users.get(ev.organizerId)?.pro,
       organizerVerified: this.isVerifiedOrganizer(ev.organizerId),
+      eventVerified: this.isEventVerified(ev),
+      proofs: manage ? (ev.proofs ?? []) : [],
+      proofSubmittedAt: manage ? (ev.proofSubmittedAt ?? null) : null,
       salesBlocked: this.salesBlocked(ev),
       moderation: ev.moderation ?? null,
       moderationReason: manage ? (ev.moderationReason ?? null) : null,
@@ -692,20 +700,17 @@ export class ToBeService {
     if (twin && !staff) {
       event.moderation = "review";
       event.moderationReason = `Ressemble à « ${twin.title} » (${twin.organizerName}) prévu le ${twin.startsAt.slice(0, 10)}`;
-    } else if (this.opts.premoderation && !staff) {
-      // Toutes les publications passent par l'équipe ToBe avant d'être visibles.
-      event.moderation = "review";
-      event.moderationReason = "Nouvelle publication à valider";
     }
+    // Publié par l'équipe ToBe : vérifié d'office.
+    if (staff) event.approvedAt = this.iso();
     this.db.events.insert(event);
     if (event.moderation) {
-      this.notifyModerators(twin ? "Événement à vérifier" : "Nouvelle publication à valider", twin ? `« ${event.title} » de ${user.name || user.email} ressemble à un événement existant.` : `« ${event.title} » de ${user.name || user.email}`, "/tobe");
-      this.notify(
-        user.id,
-        "Événement envoyé pour validation",
-        twin ? "Il ressemble à un événement déjà publié par un autre organisateur. L'équipe ToBe le vérifie, en général en quelques heures." : "L'équipe ToBe vérifie chaque publication avant sa mise en ligne, en général en quelques heures. Vous serez prévenu dès qu'il est visible.",
-        `/organisateur/${event.id}`,
-      );
+      this.notifyModerators("Événement à vérifier", `« ${event.title} » de ${user.name || user.email} ressemble à un événement existant.`, "/tobe");
+      this.notify(user.id, "Votre événement est en vérification", "Il ressemble à un événement déjà publié par un autre organisateur. L'équipe ToBe le vérifie, en général en quelques heures.", `/organisateur/${event.id}`);
+    } else if (!staff && this.opts.premoderation) {
+      this.notifyModerators("Nouvel événement à vérifier", `« ${event.title} » de ${user.name || user.email}`, "/tobe");
+      if (event.access === "paid")
+        this.notify(user.id, "Ajoutez vos preuves pour ouvrir la billetterie", "Votre événement est visible. Pour ouvrir les ventes, ToBe vérifie qu'il est bien le vôtre : ajoutez une preuve (contrat de salle, autorisation…) depuis votre espace organisateur.", `/organisateur/${event.id}`);
     }
 
     if (input.options.votes && input.contest) {
@@ -943,8 +948,29 @@ export class ToBeService {
   private salesBlocked(e: TobeEvent): string | null {
     if (e.moderation === "suspended") return "Événement retiré par ToBe";
     if (e.moderation === "review") return "Événement en cours de vérification par ToBe";
-    if (this.opts.checkout && !this.isVerifiedOrganizer(e.organizerId)) return "Ventes en ligne ouvertes dès que l'organisateur est vérifié par ToBe";
+    if (this.opts.checkout && !this.isVerifiedOrganizer(e.organizerId)) return "Billetterie ouverte dès que l'organisateur est vérifié par ToBe";
+    if (this.opts.checkout && this.opts.premoderation && !this.isEventVerified(e)) return "Billetterie ouverte dès que ToBe a vérifié cet événement";
     return null;
+  }
+
+  /** Événement vérifié par ToBe (ou publié par l'équipe ToBe). */
+  isEventVerified(e: TobeEvent) {
+    if (e.moderation) return false;
+    if (e.approvedAt) return true;
+    const u = this.db.users.get(e.organizerId);
+    return !!u && this.team.can(u, "events.all");
+  }
+
+  /** L'organisateur prouve qu'il organise bien cet événement (contrat de salle, autorisation de l'artiste…). */
+  submitEventProof(userId: string, idOrSlug: string, input: { files: { fileId: string; label: string }[]; note?: string }) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    if (!this.canManage(e, user)) throw new ApiError(403, "Seul l'organisateur peut envoyer des preuves");
+    const files = (input.files ?? []).filter((f) => typeof f.fileId === "string" && /^doc_[a-z0-9]+$/i.test(f.fileId)).slice(0, 8).map((f) => ({ fileId: f.fileId, label: String(f.label ?? "Document").slice(0, 80) }));
+    if (!files.length) throw new ApiError(400, "Ajoutez au moins un document");
+    this.db.events.update(e.id, { proofs: [...(e.proofs ?? []), ...files].slice(-12), proofNote: String(input.note ?? "").trim().slice(0, 1000) || e.proofNote || null, proofSubmittedAt: this.iso() });
+    this.notifyModerators("Preuves reçues", `« ${e.title} » : ${files.length} document(s) à vérifier.`, "/tobe");
+    return this.getEvent(e.id, user.id);
   }
 
   private assertCanSell(e: TobeEvent) {
@@ -984,7 +1010,7 @@ export class ToBeService {
   }
 
   /** Demande de vérification d'organisateur. */
-  requestVerification(userId: string, input: { fullName: string; phone: string; orgName: string; link?: string; about?: string }) {
+  requestVerification(userId: string, input: { fullName: string; phone: string; orgName: string; link?: string; about?: string; kind?: "person" | "structure"; idDocs?: string[]; selfie?: string | null; structureDocs?: string[]; structureNumber?: string; role?: string }) {
     const user = this.requireUser(userId);
     const fullName = String(input.fullName ?? "").trim();
     const phone = String(input.phone ?? "").replace(/[^\d+]/g, "");
@@ -992,8 +1018,17 @@ export class ToBeService {
     if (phone.replace(/\D/g, "").length < 8) throw new ApiError(400, "Indiquez un numéro WhatsApp joignable");
     if (!String(input.orgName ?? "").trim()) throw new ApiError(400, "Indiquez le nom de votre structure ou de votre événement");
     if (user.verification?.status === "verified") return this.myVerification(user.id);
+    const doc = (x: unknown) => typeof x === "string" && /^doc_[a-z0-9]+$/i.test(x);
+    const kind = input.kind === "structure" ? "structure" : "person";
+    const idDocs = (input.idDocs ?? []).filter(doc).slice(0, 4);
+    const structureDocs = (input.structureDocs ?? []).filter(doc).slice(0, 4);
+    const selfie = doc(input.selfie) ? (input.selfie as string) : null;
+    if (!idDocs.length) throw new ApiError(400, "Ajoutez la photo de votre pièce d'identité (CNI, passeport, permis)");
+    if (kind === "person" && !selfie) throw new ApiError(400, "Ajoutez un selfie en tenant votre pièce d'identité");
+    if (kind === "structure" && !structureDocs.length) throw new ApiError(400, "Ajoutez le document officiel de la structure (RCCM, récépissé d'association…)");
+    if (kind === "structure" && !String(input.structureNumber ?? "").trim()) throw new ApiError(400, "Indiquez le numéro RCCM ou du récépissé");
     this.db.users.update(user.id, {
-      verification: { status: "pending", fullName, phone, orgName: String(input.orgName).trim().slice(0, 100), link: String(input.link ?? "").trim().slice(0, 300), about: String(input.about ?? "").trim().slice(0, 1000), submittedAt: this.iso(), reviewedAt: null, reviewedBy: null, reason: null },
+      verification: { status: "pending", kind, idDocs, selfie, structureDocs, structureNumber: String(input.structureNumber ?? "").trim().slice(0, 60), role: String(input.role ?? "").trim().slice(0, 60), fullName, phone, orgName: String(input.orgName).trim().slice(0, 100), link: String(input.link ?? "").trim().slice(0, 300), about: String(input.about ?? "").trim().slice(0, 1000), submittedAt: this.iso(), reviewedAt: null, reviewedBy: null, reason: null },
     });
     this.notifyModerators("Organisateur à vérifier", `${fullName} (${String(input.orgName).trim()}) demande à vendre en ligne.`, "/tobe");
     return this.myVerification(user.id);
@@ -1034,6 +1069,10 @@ export class ToBeService {
         .slice(0, 50)
         .map((r) => ({ ...r, event: this.db.events.get(r.eventId) ? ev(this.db.events.get(r.eventId)!) : null, by: this.db.users.get(r.userId)?.name ?? "?" })),
       unverifiedSelling: this.db.events.filter((e) => e.access === "paid" && this.isUpcoming(e) && !this.isVerifiedOrganizer(e.organizerId)).map(ev),
+      toVerify: this.db.events
+        .filter((e) => !e.moderation && this.isUpcoming(e) && !this.isEventVerified(e))
+        .sort((a, b) => (b.proofSubmittedAt ?? "").localeCompare(a.proofSubmittedAt ?? "") || a.startsAt.localeCompare(b.startsAt))
+        .map((e) => ({ ...ev(e), proofs: e.proofs ?? [], proofNote: e.proofNote ?? null, proofSubmittedAt: e.proofSubmittedAt ?? null, organizerRequest: this.db.users.get(e.organizerId)?.verification?.status ?? null })),
     };
   }
 
@@ -1053,7 +1092,7 @@ export class ToBeService {
     const e = this.findEvent(idOrSlug);
     if (input.action === "approve") {
       this.db.events.update(e.id, { moderation: null, moderationReason: null, approvedAt: this.iso() });
-      this.notify(e.organizerId, "Événement validé : il est en ligne", `« ${e.title} » est visible sur ToBe. Partagez-le !`, `/evenement/${e.slug}`);
+      this.notify(e.organizerId, "Événement vérifié par ToBe", `« ${e.title} » porte maintenant le badge « Événement vérifié »${e.access === "paid" ? " et sa billetterie est ouverte" : ""}.`, `/evenement/${e.slug}`);
     } else {
       this.db.events.update(e.id, { moderation: "suspended", moderationReason: input.reason?.trim() || "Retiré par ToBe" });
       this.notify(e.organizerId, "Événement retiré", `« ${e.title} » a été retiré par ToBe${input.reason ? ` : ${input.reason}` : ""}. Vos reversements sont suspendus le temps de régler la situation.`, `/organisateur/${e.id}`);
