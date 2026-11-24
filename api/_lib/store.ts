@@ -174,6 +174,21 @@ export function gatewayFrom(env: Record<string, string | undefined>): Gateway | 
   return gatewayCache.gw;
 }
 
+/** Vérifie (admin) que les reversements sortent bien par l'IP fixe du relais. */
+async function relayCheck(pool: PgPool, env: Record<string, string | undefined>, token: string | null) {
+  const auth = await runApi(pool, env, { method: "GET", path: "/admin/payments", token });
+  if (auth.status !== 200) return auth;
+  const proxy = env.SASPAY_PROXY_URL || env.FIXIE_URL || env.QUOTAGUARDSTATIC_URL || "";
+  if (!proxy) return { status: 200, body: { relay: false } };
+  try {
+    const r = await proxiedFetch(proxy)("https://api.ipify.org?format=json", { signal: AbortSignal.timeout(15000) });
+    const { ip } = (await r.json()) as { ip: string };
+    return { status: 200, body: { relay: true, ip } };
+  } catch (e) {
+    return { status: 200, body: { relay: true, error: (e as Error).message } };
+  }
+}
+
 /** L'API complète, paiements compris : les appels à SasPay se font entre deux transactions. */
 export function runApiWithPayments(
   pool: PgPool,
@@ -181,6 +196,7 @@ export function runApiWithPayments(
   req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null; eledji?: EledjiProfile },
   raw?: { body: string; signature?: string | null; timestamp?: string | null },
 ) {
+  if (req.method === "GET" && req.path.replace(/\/+$/, "") === "/admin/relay-check") return relayCheck(pool, env, req.token);
   return runWithPayments(
     (r) => runApi(pool, env, { method: r.method, path: r.path, query: r.query ?? {}, body: r.body, token: r.token ?? null, eledji: req.eledji, internal: r.verified?.internal === true }),
     { gateway: gatewayFrom(env), publicUrl: env.PUBLIC_URL || "https://tobe.eledji.com", webhookSecret: env.SASPAY_WEBHOOK_SECRET || null, raw },
