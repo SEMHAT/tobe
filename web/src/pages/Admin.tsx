@@ -524,11 +524,11 @@ function PaymentsAdmin() {
   const { toast, paymentsMode } = useSession();
   const { data, setData } = useLoad(() => api<PaymentsData>("GET", "/admin/payments"), []);
   if (!data || paymentsMode !== "online") return null;
-  const act = async (id: string, a: "done" | "retry") => {
+  const act = async (id: string, a: "done" | "retry" | "send") => {
     if (a === "done" && !confirm("Confirmez que ce montant a bien été envoyé à l'organisateur depuis le tableau de bord SasPay.")) return;
     try {
       setData(await api<PaymentsData>("POST", `/admin/payouts/${id}/${a}`));
-      toast(a === "done" ? "Reversement marqué comme fait" : "Nouvel essai programmé");
+      toast(a === "done" ? "Reversement marqué comme fait" : a === "send" ? "Reversement envoyé" : "Nouvel essai programmé");
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -595,7 +595,8 @@ function PaymentsAdmin() {
           ))}
         </ul>
       )}
-      <h3 className="mt-4 text-sm font-bold">Reversements</h3>
+      <h3 className="mt-4 text-sm font-bold">Reversements aux organisateurs</h3>
+      <p className="text-xs text-muted">Ils partent tout seuls après chaque vente (dès 1 000 FCFA cumulés, organisateur vérifié). « Reverser maintenant » force l'envoi. La commission ToBe se retire depuis SasPay → Retraits.</p>
       <ul className="mt-1 divide-y divide-line text-sm">
         {data.payouts.slice(0, 15).map((p) => (
           <li key={p.id} className="flex items-center gap-3 py-2">
@@ -603,9 +604,17 @@ function PaymentsAdmin() {
               <span className="block truncate">{p.organizer}</span>
               <span className="text-xs text-muted">
                 {ago(p.updatedAt)} · {PAYOUT_LABEL[p.status]}
+                {p.phone ? ` · ${p.network ?? ""} +228 ${p.phone}` : " · pas de numéro"}
               </span>
             </span>
-            <b className="font-display">{formatFcfa(p.amount)}</b>
+            <span className="flex flex-col items-end gap-1">
+              <b className="font-display">{formatFcfa(p.amount)}</b>
+              {p.status === "queued" && p.phone && (
+                <button className="rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-white" onClick={() => act(p.id, "send")}>
+                  Reverser maintenant
+                </button>
+              )}
+            </span>
           </li>
         ))}
       </ul>

@@ -127,6 +127,8 @@ export interface Payout {
   /** queued : en attente · sending : envoyé à SasPay · sent : reçu · failed : échec (sera retenté) · manual : à faire depuis le tableau de bord SasPay */
   status: "queued" | "sending" | "sent" | "failed" | "manual";
   gatewayId: string | null;
+  /** Retrait demandé (organisateur ou équipe) : part tout de suite, même sous le seuil automatique. */
+  requested?: boolean;
   attempts: number;
   error: string | null;
   createdAt: string;

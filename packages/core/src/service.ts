@@ -1207,7 +1207,7 @@ export class ToBeService {
         if (!u?.payoutPhone || !u.payoutNetwork) return false;
         // Argent retenu tant que l'organisateur n'est pas vérifié ou qu'un de ses événements est suspendu.
         if (!this.isVerifiedOrganizer(u.id) || this.db.events.some((e) => e.organizerId === u.id && e.moderation === "suspended")) return false;
-        if (p.status === "queued") return p.amount >= PRICING.payoutMin;
+        if (p.status === "queued") return p.amount >= PRICING.payoutMin || (!!p.requested && p.amount >= PRICING.withdrawMin);
         if (p.status === "failed") return p.attempts < 5 && now - new Date(p.updatedAt).getTime() > 10 * 60_000;
         return false;
       })
@@ -1240,6 +1240,19 @@ export class ToBeService {
     return next;
   }
 
+  /** « Retirer maintenant » : la part disponible part tout de suite sur le Mobile Money de l'organisateur. */
+  withdrawNow(userId: string) {
+    const user = this.requireUser(userId);
+    const open = this.db.payouts.find((p) => p.userId === user.id && p.status === "queued");
+    if (!open || open.amount <= 0) throw new ApiError(400, "Aucun montant disponible pour l'instant");
+    if (open.amount < PRICING.withdrawMin) throw new ApiError(400, `Retrait possible à partir de ${PRICING.withdrawMin.toLocaleString("fr-FR")} FCFA`);
+    if (!user.payoutPhone || !user.payoutNetwork) throw new ApiError(400, "Indiquez d'abord votre numéro Mobile Money");
+    if (!this.isVerifiedOrganizer(user.id)) throw new ApiError(403, "Retraits possibles dès que ToBe a vérifié votre identité");
+    if (this.db.events.some((e) => e.organizerId === user.id && e.moderation === "suspended")) throw new ApiError(403, "Retraits suspendus : un de vos événements a été retiré par ToBe. Contactez l'équipe.");
+    this.db.payouts.update(open.id, { requested: true, updatedAt: this.iso() });
+    return this.myEarnings(user.id);
+  }
+
   /** Numéro Mobile Money où l'organisateur reçoit ses gains. */
   setPayoutAccount(userId: string, input: { phone: string; network: PayoutNetwork }) {
     const user = this.requireUser(userId);
@@ -1260,6 +1273,9 @@ export class ToBeService {
       phone: user.payoutPhone ?? null,
       network: user.payoutNetwork ?? null,
       pending: sum((p) => p.status !== "sent"),
+      available: sum((p) => p.status === "queued"),
+      withdrawMin: PRICING.withdrawMin,
+      canWithdraw: this.isVerifiedOrganizer(user.id) && !!user.payoutPhone && !!user.payoutNetwork,
       sent: sum((p) => p.status === "sent"),
       min: PRICING.payoutMin,
       commission: { ticket: PRICING.ticketCommission, vote: PRICING.voteCommission, cagnotte: PRICING.cagnotteCommission },
@@ -1288,11 +1304,14 @@ export class ToBeService {
   }
 
   /** Reversement fait à la main depuis le tableau de bord SasPay, ou à relancer. */
-  adminPayoutAction(userId: string, payoutId: string, action: "done" | "retry") {
+  adminPayoutAction(userId: string, payoutId: string, action: "done" | "retry" | "send") {
     this.requireAdmin(userId, "team.manage");
     const p = this.db.payouts.get(payoutId);
     if (!p) throw new ApiError(404, "Reversement introuvable");
-    if (action === "done") this.recordPayout(p.id, { status: "sent", error: null });
+    if (action === "send") {
+      if (p.status !== "queued") throw new ApiError(400, "Ce reversement est déjà en cours");
+      this.db.payouts.update(p.id, { requested: true, updatedAt: this.iso() });
+    } else if (action === "done") this.recordPayout(p.id, { status: "sent", error: null });
     else this.db.payouts.update(p.id, { status: "failed", attempts: 0, error: null, updatedAt: new Date(0).toISOString() });
     return this.adminPayments(userId);
   }

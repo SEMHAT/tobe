@@ -11,6 +11,9 @@ interface Earnings {
   phone: string | null;
   network: PayoutNetwork | null;
   pending: number;
+  available: number;
+  withdrawMin: number;
+  canWithdraw: boolean;
   sent: number;
   min: number;
   commission: { ticket: number; vote: number; cagnotte: number };
@@ -41,6 +44,19 @@ export function EarningsCard() {
   const [phone, setPhone] = useState("");
   const [network, setNetwork] = useState<PayoutNetwork>("moov");
   const [busy, setBusy] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const withdraw = async () => {
+    if (!data || !confirm(`Envoyer ${formatFcfa(data.available)} sur votre Mobile Money ${data.network ? NETWORKS.find((n) => n.id === data.network)?.label : ""} +228 ${data.phone ?? ""} ?`)) return;
+    setWithdrawing(true);
+    try {
+      const r = await api<Earnings>("POST", "/me/payouts/withdraw");
+      setData(r);
+      toast(r.available === 0 ? "Retrait envoyé : l'argent arrive sur votre Mobile Money" : "Retrait demandé");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    setWithdrawing(false);
+  };
   if (!data || paymentsMode !== "online") return null;
   const editing = edit || !data.phone;
 
@@ -70,16 +86,32 @@ export function EarningsCard() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="rounded-2xl bg-brand/10 p-3">
+          <div className="text-xs text-muted">Disponible</div>
+          <div className="font-display text-lg font-bold text-brand">{formatFcfa(data.available)}</div>
+        </div>
+        <div className="rounded-2xl bg-card-2 p-3">
+          <div className="text-xs text-muted">En route</div>
+          <div className="font-display text-lg font-bold">{formatFcfa(data.pending - data.available)}</div>
+        </div>
         <div className="rounded-2xl bg-card-2 p-3">
           <div className="text-xs text-muted">Déjà reçu</div>
-          <div className="font-display text-xl font-bold">{formatFcfa(data.sent)}</div>
-        </div>
-        <div className="rounded-2xl bg-card-2 p-3">
-          <div className="text-xs text-muted">En cours de versement</div>
-          <div className="font-display text-xl font-bold">{formatFcfa(data.pending)}</div>
+          <div className="font-display text-lg font-bold">{formatFcfa(data.sent)}</div>
         </div>
       </div>
+      <Button full className="mt-3" icon={<Wallet className="size-5" />} loading={withdrawing} disabled={!data.canWithdraw || data.available < data.withdrawMin} onClick={withdraw}>
+        {data.available > 0 ? `Retirer ${formatFcfa(data.available)} maintenant` : "Retirer"}
+      </Button>
+      <p className="mt-1.5 text-center text-xs text-muted">
+        {!data.phone
+          ? "Indiquez ci-dessous votre numéro Mobile Money pour pouvoir retirer."
+          : !data.canWithdraw
+            ? "Retraits possibles dès que ToBe a vérifié votre identité."
+            : data.available < data.withdrawMin
+              ? `Retrait possible dès ${formatFcfa(data.withdrawMin)}. Sinon, l'argent part tout seul dès ${formatFcfa(data.min)} cumulés.`
+              : "L'argent arrive en quelques minutes. Sans rien faire, il part aussi tout seul après chaque vente."}
+      </p>
 
       {editing ? (
         <div className="mt-4 space-y-3">

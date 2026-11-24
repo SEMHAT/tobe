@@ -73,6 +73,14 @@ export async function runWithPayments(run: Runner, opts: FlowOptions, req: FlowR
     return run(req);
   }
 
+  // Retrait demandé : on l'envoie tout de suite, et on renvoie l'état à jour.
+  if (method === "POST" && (path === "/me/payouts/withdraw" || /^\/admin\/payouts\/[^/]+\/send$/.test(path))) {
+    const first = await run(req);
+    if (first.status !== 200) return first;
+    await processPayouts(internal, gw, log);
+    return run({ ...req, method: "GET", path: path === "/me/payouts/withdraw" ? "/me/earnings" : "/admin/payments", body: undefined });
+  }
+
   const res = await run(req);
   const co = (res.body as { checkout?: { intentId: string } } | null)?.checkout;
   if (res.status !== 200 || !co?.intentId) return res;

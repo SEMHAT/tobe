@@ -149,3 +149,24 @@ test("routes internes inaccessibles depuis l'extérieur, signature des webhooks"
   assert.equal(await verifySasPayWebhook(body + " ", { signature: sig, timestamp: ts }, secret), false);
   assert.equal(await verifySasPayWebhook(body, { signature: sig, timestamp: String(Number(ts) - 600) }, secret), false);
 });
+
+test("« Retirer maintenant » : envoie tout de suite une part sous le seuil automatique", async () => {
+  const t = setup();
+  const orga = t.login("orga@exemple.tg", "Orga");
+  const fan = t.login("fan@exemple.tg", "Fan");
+  t.verify(orga.user.id);
+  const ev = t.svc.createEvent(orga.user.id, { title: "Petit concert", category: "concert", startsAt: new Date(Date.now() + 5 * 86400_000).toISOString(), venue: "Bar", description: "", visibility: "public", access: "paid", ticketTypes: [{ name: "Entrée", price: 1000, quota: 0 }], expectedAttendance: 50, reach: "quartier", options: {} as never });
+  const r = await t.call("POST", `/events/${ev.id}/tickets`, fan.token, { ticketTypeId: ev.ticketTypes[0].id, qty: 1 });
+  t.paid.add(t.db.intents.get((r.body as { intentId: string }).intentId)!.gatewaySessionId!);
+  // Sans numéro : refusé.
+  await t.call("POST", "/cron/payments", null);
+  assert.equal((await t.call("POST", "/me/payouts/withdraw", orga.token)).status, 400);
+  t.svc.setPayoutAccount(orga.user.id, { phone: "96112233", network: "moov" });
+  await t.call("POST", "/cron/payments", null);
+  assert.equal(t.payouts.length, 0, "850 FCFA < seuil automatique : rien ne part seul");
+  const w = await t.call("POST", "/me/payouts/withdraw", orga.token);
+  assert.equal(w.status, 200);
+  assert.equal(t.payouts.length, 1);
+  assert.equal(t.payouts[0].amount, 850);
+  assert.equal((w.body as { available: number }).available, 0);
+});
