@@ -674,7 +674,7 @@ function ModerationAdmin() {
       <h2 className="flex items-center gap-2 font-display text-lg font-bold">
         <ShieldAlert className="size-5 text-brand" /> Garde-fous {total > 0 && <span className="rounded-full bg-coral px-2 py-0.5 text-xs text-white">{total}</span>}
       </h2>
-      <p className="mt-1 text-xs text-muted">Organisateurs à vérifier avant d'ouvrir leurs ventes, événements qui ressemblent à un autre, signalements du public.</p>
+      <p className="mt-1 text-xs text-muted">Chaque nouvelle publication attend votre validation. Ici aussi : organisateurs à vérifier avant d'ouvrir leurs ventes, doublons possibles, signalements du public.</p>
 
       <h3 className="mt-4 text-sm font-bold">Organisateurs à vérifier</h3>
       {data.verifications.length === 0 ? (
@@ -714,7 +714,7 @@ function ModerationAdmin() {
 
       {data.events.length > 0 && (
         <>
-          <h3 className="mt-4 text-sm font-bold">Événements en vérification ou retirés</h3>
+          <h3 className="mt-4 text-sm font-bold">Publications à valider et événements retirés</h3>
           <div className="mt-2 space-y-2">
             {data.events.map((e) => (
               <Ev key={e.id} e={e} />

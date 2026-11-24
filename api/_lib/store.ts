@@ -35,6 +35,8 @@ export function serviceOptions(env: Record<string, string | undefined>) {
     paymentsEnabled: env.PAYMENTS_ENABLED === "true",
     // Paiement réel dès que la clé secrète SasPay est configurée sur Vercel.
     checkout: !!env.SASPAY_SECRET_KEY,
+    // Validation de chaque publication par l'équipe (désactivable avec PREMODERATION=false).
+    premoderation: env.PREMODERATION !== "false",
     exposeOtp: env.EXPOSE_OTP === "true",
     googleClientId: env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID,
     sendCode: (email: string, code: string) => sendLoginCode(email, code, env),

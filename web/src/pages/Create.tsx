@@ -581,8 +581,16 @@ function Published({ e, tobe }: { e: EventView; tobe: boolean }) {
       <div className="pop mx-auto mt-10 grid size-20 place-items-center rounded-full brand-gradient text-white">
         <Check className="size-10" strokeWidth={3} />
       </div>
-      <h1 className="mt-5 text-center text-[26px] font-extrabold">C'est en ligne !</h1>
-      <p className="mt-1 text-center text-muted">{e.visibility === "public" ? "Votre événement est visible dans l'app." : e.visibility === "unlisted" ? "Partagez le lien : seules les personnes qui l'ont peuvent le voir." : "Partagez le lien et le code avec vos invités."}</p>
+      <h1 className="mt-5 text-center text-[26px] font-extrabold">{e.moderation ? "Envoyé pour validation" : "C'est en ligne !"}</h1>
+      <p className="mt-1 text-center text-muted">
+        {e.moderation
+          ? "L'équipe ToBe vérifie chaque publication avant sa mise en ligne, en général en quelques heures. Vous recevez une notification dès qu'elle est visible : vous pourrez alors partager le lien."
+          : e.visibility === "public"
+            ? "Votre événement est visible dans l'app."
+            : e.visibility === "unlisted"
+              ? "Partagez le lien : seules les personnes qui l'ont peuvent le voir."
+              : "Partagez le lien et le code avec vos invités."}
+      </p>
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-line bg-card">
         <Poster cover={e.cover} theme={e.theme} category={e.category} title={e.title} className="aspect-[16/10]">

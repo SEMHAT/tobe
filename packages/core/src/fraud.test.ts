@@ -81,3 +81,23 @@ test("3 signalements de visiteurs différents → mis en vérification", () => {
   svc.reportEvent(x.id, ev.id, { reason: "faux" }); // un seul signalement par personne
   assert.ok(!svc.listEvents({}).some((e) => e.id === ev.id));
 });
+
+test("validation de chaque publication : invisible jusqu'à l'accord de l'équipe ; l'équipe publie directement", () => {
+  const db = createDb();
+  const svc = new ToBeService(db, { exposeOtp: true, premoderation: true, adminEmails: ["staff@tobe.tg"] } as never);
+  const login = (email: string, name: string) => svc.verifyOtp(email, (svc.requestOtp(email) as { devCode: string }).devCode, name).user;
+  const staff = login("staff@tobe.tg", "Staff");
+  db.users.update(staff.id, { teamRole: "super_admin" } as never);
+  const orga = login("orga@exemple.tg", "Orga");
+  const fan = login("fan@exemple.tg", "Fan");
+  const mk = (t: string) => ({ title: t, category: "soiree" as const, startsAt: new Date(Date.now() + 9 * 86400_000).toISOString(), venue: "Bar", description: "", visibility: "public" as const, access: "free" as const, ticketTypes: [{ name: "Entrée", price: 0, quota: 0 }], expectedAttendance: 50, reach: "quartier" as const, options: {} as never });
+  const e = svc.createEvent(orga.id, mk("Soirée salsa"));
+  assert.equal(e.moderation, "review");
+  assert.ok(!svc.listEvents({}).some((x) => x.id === e.id));
+  assert.throws(() => svc.getEvent(e.slug, fan.id), (x: ApiError) => x.status === 403);
+  assert.ok(svc.moderationQueue(staff.id).events.some((x) => x.id === e.id));
+  svc.moderateEvent(staff.id, e.id, { action: "approve" });
+  assert.ok(svc.listEvents({}).some((x) => x.id === e.id));
+  assert.equal(svc.getEvent(e.slug, fan.id).isOrganizer, false, "un visiteur ne peut pas modifier");
+  assert.equal(svc.createEvent(staff.id, mk("Soirée de l'équipe")).moderation, null);
+});

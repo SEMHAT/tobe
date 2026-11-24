@@ -117,6 +117,7 @@ export function Organizer() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <TierBadge tier={r.event.impact.tier} className="h-5 px-2 text-[10px]" />
+                        {r.event.moderation && <span className="rounded-full bg-[#fff4dc] px-2 py-0.5 text-[10px] font-bold text-[#7a4a00]">{r.event.moderation === "review" ? "En attente de validation" : "Retiré"}</span>}
                         {!r.upcoming && <span className="text-xs text-faint">Terminé</span>}
                         {r.event.visibility === "private" && <Lock className="size-3.5 text-faint" />}
                       </div>

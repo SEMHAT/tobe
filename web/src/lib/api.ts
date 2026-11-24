@@ -91,7 +91,8 @@ export async function api<T = any>(method: "GET" | "POST" | "PATCH" | "DELETE", 
     }
     return structuredClone(r.body) as T;
   }
-  const cle = `${path}${qs(query)}`;
+  // Copie hors connexion propre à chaque compte : jamais la vue organisateur d'un autre.
+  const cle = `${token ? token.slice(-10) : "anon"}:${path}${qs(query)}`;
   let res: Response;
   try {
     res = await fetch(`${API_URL}/api${path}${qs(query)}`, {

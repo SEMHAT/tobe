@@ -18,7 +18,7 @@ test("API sur Postgres : connexion, écriture sous verrou, lectures concurrentes
         );
       }),
   };
-  const env = { EXPOSE_OTP: "true", ADMIN_EMAILS: "admin@tobe.test" };
+  const env = { EXPOSE_OTP: "true", ADMIN_EMAILS: "admin@tobe.test", PREMODERATION: "false" };
   const call = (method: string, p: string, body?: unknown, token: string | null = null, query: Record<string, string> = {}) => runApi(pool, env, { method, path: p, body: body ?? {}, query, token });
   try {
     assert.equal((await call("GET", "/home")).status, 200);

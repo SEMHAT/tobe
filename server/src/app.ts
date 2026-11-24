@@ -12,7 +12,7 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   const cfg = { ...config, ...opts };
   if (cfg.seed) seedDb(db);
   const vapid = ensureVapid(db, process.env);
-  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, checkout: !!process.env.SASPAY_SECRET_KEY, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
+  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, checkout: !!process.env.SASPAY_SECRET_KEY, premoderation: process.env.PREMODERATION === "true", googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
 
   const app = express();
   app.disable("x-powered-by");

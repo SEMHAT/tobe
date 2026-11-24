@@ -63,6 +63,8 @@ export interface ServiceOptions {
   paymentsEnabled?: boolean;
   /** Paiement réel par page hébergée (SasPay) : chaque achat crée un paiement à confirmer. */
   checkout?: boolean;
+  /** Chaque nouvel événement (hors équipe ToBe) attend la validation de l'équipe avant d'être visible. */
+  premoderation?: boolean;
   /** Identifiant client OAuth Google (connexion avec Google). */
   googleClientId?: string | null;
   /** Envoi du code de connexion par e-mail. */
@@ -88,6 +90,7 @@ export interface EventCard {
   theme: Theme;
   access: Access;
   entryInfo: string | null;
+  moderation: "review" | "suspended" | null;
   visibility: Visibility;
   priceFrom: number;
   impact: Impact;
@@ -259,6 +262,7 @@ export class ToBeService {
       demo: options.demo ?? false,
       paymentsEnabled: !!(options.paymentsEnabled || options.checkout),
       checkout: options.checkout ?? false,
+      premoderation: options.premoderation ?? false,
       sendCode: options.sendCode,
       googleClientId: options.googleClientId ?? null,
       push: options.push ?? null,
@@ -479,6 +483,7 @@ export class ToBeService {
       theme: e.theme,
       access: e.access,
       entryInfo: e.access === "none" ? (e.entryInfo ?? null) : null,
+      moderation: e.moderation ?? null,
       visibility: e.visibility,
       priceFrom: e.access === "paid" && prices.length ? Math.min(...prices) : 0,
       impact: computeImpact(e),
@@ -683,14 +688,24 @@ export class ToBeService {
     };
     // Garde-fou : même titre (ou presque) et dates proches qu'un événement d'un autre organisateur.
     const twin = this.lookalike(event);
-    if (twin && !this.team.can(user, "events.all")) {
+    const staff = this.team.can(user, "events.all");
+    if (twin && !staff) {
       event.moderation = "review";
       event.moderationReason = `Ressemble à « ${twin.title} » (${twin.organizerName}) prévu le ${twin.startsAt.slice(0, 10)}`;
+    } else if (this.opts.premoderation && !staff) {
+      // Toutes les publications passent par l'équipe ToBe avant d'être visibles.
+      event.moderation = "review";
+      event.moderationReason = "Nouvelle publication à valider";
     }
     this.db.events.insert(event);
     if (event.moderation) {
-      this.notifyModerators("Événement à vérifier", `« ${event.title} » de ${user.name || user.email} ressemble à un événement existant.`, "/tobe");
-      this.notify(user.id, "Votre événement est en vérification", "Il ressemble à un événement déjà publié par un autre organisateur. L'équipe ToBe le vérifie, en général en quelques heures.", `/organisateur/${event.id}`);
+      this.notifyModerators(twin ? "Événement à vérifier" : "Nouvelle publication à valider", twin ? `« ${event.title} » de ${user.name || user.email} ressemble à un événement existant.` : `« ${event.title} » de ${user.name || user.email}`, "/tobe");
+      this.notify(
+        user.id,
+        "Événement envoyé pour validation",
+        twin ? "Il ressemble à un événement déjà publié par un autre organisateur. L'équipe ToBe le vérifie, en général en quelques heures." : "L'équipe ToBe vérifie chaque publication avant sa mise en ligne, en général en quelques heures. Vous serez prévenu dès qu'il est visible.",
+        `/organisateur/${event.id}`,
+      );
     }
 
     if (input.options.votes && input.contest) {
@@ -1038,7 +1053,7 @@ export class ToBeService {
     const e = this.findEvent(idOrSlug);
     if (input.action === "approve") {
       this.db.events.update(e.id, { moderation: null, moderationReason: null, approvedAt: this.iso() });
-      this.notify(e.organizerId, "Événement validé", `« ${e.title} » est de nouveau visible sur ToBe.`, `/evenement/${e.slug}`);
+      this.notify(e.organizerId, "Événement validé : il est en ligne", `« ${e.title} » est visible sur ToBe. Partagez-le !`, `/evenement/${e.slug}`);
     } else {
       this.db.events.update(e.id, { moderation: "suspended", moderationReason: input.reason?.trim() || "Retiré par ToBe" });
       this.notify(e.organizerId, "Événement retiré", `« ${e.title} » a été retiré par ToBe${input.reason ? ` : ${input.reason}` : ""}. Vos reversements sont suspendus le temps de régler la situation.`, `/organisateur/${e.id}`);
