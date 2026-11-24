@@ -9,6 +9,8 @@ import type {
   PushSub,
   Reminder,
   Setting,
+  PaymentIntent,
+  Payout,
   Order,
   Otp,
   Player,
@@ -113,6 +115,8 @@ export const COLLECTIONS = [
   "pushSubs",
   "reminders",
   "settings",
+  "intents",
+  "payouts",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
@@ -142,6 +146,8 @@ export interface Db {
   pushSubs: Collection<PushSub>;
   reminders: Collection<Reminder>;
   settings: Collection<Setting>;
+  intents: Collection<PaymentIntent>;
+  payouts: Collection<Payout>;
 }
 
 export type DbSnapshot = { [K in CollectionName]?: { id: string }[] };

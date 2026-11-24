@@ -39,6 +39,8 @@ interface Ctx {
   setTheme: (t: "dark" | "light") => void;
   /** Paiement en ligne actif (sinon : réservation, paiement à l'entrée). */
   payments: boolean;
+  /** online : vrai paiement (page sécurisée SasPay) · simulated : démonstration */
+  paymentsMode: "online" | "simulated" | null;
   /** Identifiant client Google (bouton « Continuer avec Google »), null si indisponible. */
   googleClientId: string | null;
 }
@@ -54,11 +56,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<{ id: number; msg: string; kind: "ok" | "error" }[]>([]);
   const [theme, setThemeState] = useState<"dark" | "light">(() => (localStorage.getItem("tobe-theme") as "dark" | "light") || "light");
   const [payments, setPayments] = useState(false);
+  const [paymentsMode, setPaymentsMode] = useState<"online" | "simulated" | null>(null);
   const [googleClientId, setGoogleClientId] = useState<string | null>(null);
   useEffect(() => {
-    api<{ paymentsEnabled: boolean; googleClientId?: string | null }>("GET", "/config")
+    api<{ paymentsEnabled: boolean; paymentsMode?: "online" | "simulated" | null; googleClientId?: string | null }>("GET", "/config")
       .then((c) => {
         setPayments(c.paymentsEnabled);
+        setPaymentsMode(c.paymentsMode ?? null);
         setGoogleClientId(c.googleClientId ?? null);
       })
       .catch(() => {});
@@ -145,7 +149,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme, payments, googleClientId }}>
+    <SessionCtx.Provider value={{ me, ready, refresh, logout, requireAuth, toast, theme, setTheme, payments, paymentsMode, googleClientId }}>
       {children}
       <AuthSheet
         open={!!auth}

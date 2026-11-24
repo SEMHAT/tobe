@@ -124,7 +124,7 @@ export function Checkout() {
             <PayPicker value={method} onChange={setMethod} />
             <div className="mt-6 space-y-2 rounded-2xl border border-line bg-card p-4 text-sm">
               <Row label={`${qty} × ${tt.name}`} value={formatFcfa(subtotal)} />
-              <Row label="Frais de service" value={formatFcfa(fee)} />
+              {fee > 0 && <Row label="Frais de service" value={formatFcfa(fee)} />}
               <div className="my-2 border-t border-line" />
               <Row label={<b>Total</b>} value={<b className="font-display text-lg text-brand">{formatFcfa(subtotal + fee)}</b>} />
             </div>

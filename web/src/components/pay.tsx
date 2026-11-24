@@ -1,5 +1,6 @@
 import type { PayMethod } from "@tobe/core";
-import { CreditCard, Smartphone } from "lucide-react";
+import { CreditCard, LockKeyhole, Smartphone } from "lucide-react";
+import { useSession } from "../lib/session";
 import { cx } from "./ui";
 
 const METHODS: { id: PayMethod; label: string; sub: string; color: string }[] = [
@@ -9,6 +10,20 @@ const METHODS: { id: PayMethod; label: string; sub: string; color: string }[] = 
 ];
 
 export function PayPicker({ value, onChange }: { value: PayMethod; onChange: (m: PayMethod) => void }) {
+  const { paymentsMode } = useSession();
+  // Vrai paiement : le client choisit son réseau sur la page sécurisée de l'agrégateur.
+  if (paymentsMode === "online")
+    return (
+      <div className="flex items-start gap-3 rounded-2xl border border-line bg-card p-4">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand/10 text-brand">
+          <LockKeyhole className="size-5" />
+        </span>
+        <span className="text-sm">
+          <span className="block font-semibold">Mobile Money · paiement sécurisé</span>
+          <span className="mt-0.5 block text-muted">Moov Money ou Togocel Money : vous choisissez votre réseau et validez sur votre téléphone à l'étape suivante. Les frais de l'opérateur s'ajoutent au montant.</span>
+        </span>
+      </div>
+    );
   return (
     <div className="space-y-2">
       {METHODS.map((m) => (

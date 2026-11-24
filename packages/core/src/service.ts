@@ -48,6 +48,7 @@ import type {
 } from "./types.js";
 
 import { ApiError } from "./errors.js";
+import type { IntentAction, PaymentIntent, Payout, PayoutNetwork } from "./types.js";
 export { ApiError };
 
 export interface ServiceOptions {
@@ -60,6 +61,8 @@ export interface ServiceOptions {
   demo?: boolean;
   /** Paiements en ligne actifs (agrégateur Mobile Money branché). Sinon : réservation et paiement à l'entrée. */
   paymentsEnabled?: boolean;
+  /** Paiement réel par page hébergée (SasPay) : chaque achat crée un paiement à confirmer. */
+  checkout?: boolean;
   /** Identifiant client OAuth Google (connexion avec Google). */
   googleClientId?: string | null;
   /** Envoi du code de connexion par e-mail. */
@@ -249,7 +252,8 @@ export class ToBeService {
       exposeOtp: options.exposeOtp ?? false,
       adminEmails: (options.adminEmails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean),
       demo: options.demo ?? false,
-      paymentsEnabled: options.paymentsEnabled ?? false,
+      paymentsEnabled: !!(options.paymentsEnabled || options.checkout),
+      checkout: options.checkout ?? false,
       sendCode: options.sendCode,
       googleClientId: options.googleClientId ?? null,
       push: options.push ?? null,
@@ -296,7 +300,7 @@ export class ToBeService {
   // Authentification par code envoyé par e-mail
   // =====================================================================
   config() {
-    return { paymentsEnabled: this.opts.paymentsEnabled, auth: "email" as const, demo: this.opts.demo, googleClientId: this.opts.googleClientId || null, vapidPublicKey: this.opts.push?.publicKey ?? null };
+    return { paymentsEnabled: this.opts.paymentsEnabled, paymentsMode: this.opts.checkout ? ("online" as const) : this.opts.paymentsEnabled ? ("simulated" as const) : null, auth: "email" as const, demo: this.opts.demo, googleClientId: this.opts.googleClientId || null, vapidPublicKey: this.opts.push?.publicKey ?? null };
   }
 
   requestOtp(rawEmail: string): { sent: true; email: string; devCode?: string } {
@@ -691,7 +695,7 @@ export class ToBeService {
       this.db.events.update(id, { cagnotteId: cg.id });
     }
     if (input.tobe) this.requestTobe(user.id, { ...input.tobe, eventId: id });
-    if (input.boost && this.opts.paymentsEnabled) this.buyBoost(user.id, id, input.boost.plan, input.boost.method);
+    if (input.boost && this.opts.paymentsEnabled && !this.opts.checkout) this.buyBoost(user.id, id, input.boost.plan, input.boost.method);
     return this.getEvent(id, user.id);
   }
 
@@ -842,31 +846,259 @@ export class ToBeService {
     if (!this.opts.paymentsEnabled) throw new ApiError(400, `${what} : le paiement en ligne arrive bientôt sur ToBe.`);
   }
 
-  private pay(userId: string, kind: Parameters<ToBeService["recordPayment"]>[0]["kind"], refId: string, eventId: string | null, amount: number, platformFee: number, method: PayMethod) {
+  private pay(userId: string, kind: Parameters<ToBeService["recordPayment"]>[0]["kind"], refId: string, eventId: string | null, amount: number, platformFee: number, method: PayMethod, settle?: PaymentIntent | null, organizerId?: string | null) {
     if (amount < 0) throw new ApiError(400, "Montant invalide");
-    return this.recordPayment({ userId, kind, refId, eventId, amount, platformFee, method });
+    const organizerShare = organizerId ? Math.max(0, amount - platformFee) : 0;
+    const p = this.recordPayment({ userId, kind, refId, eventId, amount, platformFee, method: settle ? "online" : method, intentId: settle?.id ?? null, organizerShare, organizerId: organizerId ?? null });
+    // Paiement réel : la part de l'organisateur part sur son Mobile Money.
+    if (settle && organizerId && organizerShare > 0) this.queuePayout(organizerId, eventId, settle.id, organizerShare);
+    return p;
   }
 
-  private recordPayment(p: { userId: string; kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro"; refId: string; eventId: string | null; amount: number; platformFee: number; method: PayMethod }) {
+  private recordPayment(p: { userId: string; kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro"; refId: string; eventId: string | null; amount: number; platformFee: number; method: PayMethod; intentId?: string | null; organizerShare?: number; organizerId?: string | null }) {
     return this.db.payments.insert({ id: newId("pay"), createdAt: this.iso(), ...p });
+  }
+
+  /** Paiement réel nécessaire ? Alors on crée un paiement à régler sur la page SasPay au lieu d'agir tout de suite. */
+  private needsCheckout(amount: number, settle?: PaymentIntent | null) {
+    return !!this.opts.checkout && amount > 0 && !settle;
+  }
+
+  private openIntent(userId: string, action: IntentAction, amount: number, eventId: string | null, description: string) {
+    const intent = this.db.intents.insert({
+      id: newId("pmt"),
+      userId,
+      action,
+      eventId,
+      amount: Math.round(amount),
+      description,
+      status: "created",
+      gatewaySessionId: null,
+      checkoutUrl: null,
+      transactionId: null,
+      resultRef: null,
+      resultLink: null,
+      error: null,
+      createdAt: this.iso(),
+      paidAt: null,
+    });
+    return { checkout: { intentId: intent.id, amount: intent.amount } };
+  }
+
+  /** Billets en cours de paiement depuis moins de 30 minutes (places mises de côté). */
+  private heldTickets(ticketTypeId: string) {
+    const since = this.now().getTime() - 30 * 60_000;
+    return this.db.intents
+      .filter((i) => i.action.kind === "ticket" && i.action.ticketTypeId === ticketTypeId && (i.status === "created" || i.status === "pending") && new Date(i.createdAt).getTime() > since)
+      .reduce((n, i) => n + (i.action as { qty: number }).qty, 0);
+  }
+
+  // ---------- Paiement en ligne (SasPay) : appelé par la couche serveur, jamais directement par le client ----------
+
+  /** Ce qu'il faut pour ouvrir la page de paiement. */
+  intentForCheckout(intentId: string) {
+    const i = this.db.intents.get(intentId);
+    if (!i) throw new ApiError(404, "Paiement introuvable");
+    const u = this.db.users.get(i.userId);
+    return { intent: i, customer: { email: u?.email || "client@tobe.eledji.com", name: u?.name || "Client ToBe", phone: u?.phone ?? null } };
+  }
+
+  attachCheckout(intentId: string, sessionId: string, url: string) {
+    const i = this.db.intents.get(intentId);
+    if (!i) throw new ApiError(404, "Paiement introuvable");
+    this.db.intents.update(i.id, { status: "pending", gatewaySessionId: sessionId, checkoutUrl: url });
+    return { checkoutUrl: url, intentId: i.id };
+  }
+
+  failIntent(intentId: string, status: "failed" | "expired", error: string | null) {
+    const i = this.db.intents.get(intentId);
+    if (!i || i.status === "paid") return i ?? null;
+    return this.db.intents.update(i.id, { status, error });
+  }
+
+  /** Paiements à revérifier auprès de SasPay (en cours depuis moins de 26 heures). */
+  pendingIntents() {
+    const since = this.now().getTime() - 26 * 3600_000;
+    return this.db.intents.filter((i) => i.status === "pending" && !!i.gatewaySessionId && new Date(i.createdAt).getTime() > since).map((i) => ({ id: i.id, sessionId: i.gatewaySessionId! }));
+  }
+
+  /** Paiement confirmé par SasPay : on délivre ce qui a été acheté (une seule fois). */
+  settleIntent(intentId: string, transactionId: string | null) {
+    const i = this.db.intents.get(intentId);
+    if (!i) throw new ApiError(404, "Paiement introuvable");
+    if (i.status === "paid") return i;
+    const paid = this.db.intents.update(i.id, { status: "paid", transactionId, paidAt: this.iso() });
+    const a = i.action;
+    let ref: string | null = null;
+    let link: string | null = null;
+    try {
+      if (a.kind === "ticket") {
+        const o = this.buyTickets(i.userId, a.eventId, { ticketTypeId: a.ticketTypeId, qty: a.qty, method: "online", code: a.code }, paid);
+        ref = o.id;
+        link = "/billets?nouveau=1";
+        const e = this.db.events.get(a.eventId);
+        this.notify(i.userId, "Paiement reçu, vos billets sont prêts", `${a.qty} billet${a.qty > 1 ? "s" : ""} pour ${e?.title ?? "l'événement"}. Présentez le QR code à l'entrée.`, "/billets");
+        if (e) this.notify(e.organizerId, "Nouvelle vente", `${a.qty} billet${a.qty > 1 ? "s" : ""} ${o.ticketTypeName} vendu${a.qty > 1 ? "s" : ""} pour ${e.title}.`, `/organisateur/${e.id}`);
+      } else if (a.kind === "vote") {
+        const r = this.vote(i.userId, a.contestId, { candidateId: a.candidateId, pack: a.pack as "1" | "10" | "50", method: "online" }, paid) as { vote: { id: string } };
+        ref = r.vote.id;
+        const c = this.db.contests.get(a.contestId);
+        link = c ? `/vote/${c.eventId}` : null;
+      } else if (a.kind === "contribution") {
+        this.contribute(i.userId, a.cagnotteId, { amount: a.amount, message: a.message, anonymous: a.anonymous, name: a.name, method: "online", code: a.code }, paid);
+        ref = a.cagnotteId;
+        const cg = this.db.cagnottes.get(a.cagnotteId);
+        link = cg ? `/cagnotte/${cg.eventId}` : null;
+      } else if (a.kind === "boost") {
+        this.buyBoost(i.userId, a.eventId, a.plan as BoostPlan, "online", paid);
+        ref = a.eventId;
+        link = `/organisateur/${a.eventId}`;
+      } else if (a.kind === "subscription") {
+        this.subscribe(i.userId, a.plan, "online", paid);
+        ref = a.plan;
+        link = a.plan === "pro" ? "/organisateur" : "/photos";
+      }
+      return this.db.intents.update(i.id, { resultRef: ref, resultLink: link, error: null });
+    } catch (e) {
+      // Argent reçu mais action impossible (candidat supprimé…) : l'équipe ToBe doit rembourser.
+      const msg = e instanceof Error ? e.message : String(e);
+      for (const u of this.db.users.filter((x) => this.team.can(x, "team.manage"))) this.notify(u.id, "Paiement reçu à traiter", `${i.amount} FCFA payés mais « ${i.description} » n'a pas pu être délivré : ${msg}. Remboursement à prévoir.`, "/tobe");
+      return this.db.intents.update(i.id, { error: msg });
+    }
+  }
+
+  /** Où en est un paiement (page de retour après SasPay). */
+  paymentStatus(userId: string | null, intentId: string) {
+    const i = this.db.intents.get(intentId);
+    if (!i) throw new ApiError(404, "Paiement introuvable");
+    return { id: i.id, status: i.status, amount: i.amount, description: i.description, link: i.resultLink, error: i.status === "paid" ? i.error : null, mine: !!userId && userId === i.userId };
+  }
+
+  // ---------- Reversements aux organisateurs ----------
+
+  private queuePayout(organizerId: string, eventId: string | null, intentId: string, amount: number) {
+    const open = this.db.payouts.find((p) => p.userId === organizerId && p.status === "queued");
+    if (open) return this.db.payouts.update(open.id, { amount: open.amount + amount, intentIds: [...open.intentIds, intentId], eventId: open.eventId === eventId ? eventId : null, updatedAt: this.iso() });
+    return this.db.payouts.insert({ id: newId("vrs"), userId: organizerId, eventId, intentIds: [intentId], amount, phone: null, network: null, status: "queued", gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
+  }
+
+  /** Reversements prêts à partir : montant suffisant et numéro renseigné ; échecs retentés toutes les 10 minutes (5 fois). */
+  duePayouts() {
+    const now = this.now().getTime();
+    return this.db.payouts
+      .filter((p) => {
+        const u = this.db.users.get(p.userId);
+        if (!u?.payoutPhone || !u.payoutNetwork) return false;
+        if (p.status === "queued") return p.amount >= PRICING.payoutMin;
+        if (p.status === "failed") return p.attempts < 5 && now - new Date(p.updatedAt).getTime() > 10 * 60_000;
+        return false;
+      })
+      .map((p) => {
+        const u = this.db.users.get(p.userId)!;
+        return { id: p.id, amount: p.amount, phone: u.payoutPhone!, network: u.payoutNetwork!, name: u.name, email: u.email, attempts: p.attempts };
+      });
+  }
+
+  /** Reversements envoyés dont on attend la confirmation. */
+  sendingPayouts() {
+    return this.db.payouts.filter((p) => p.status === "sending" && !!p.gatewayId).map((p) => ({ id: p.id, gatewayId: p.gatewayId! }));
+  }
+
+  /** On s'apprête à envoyer : le montant est figé (les prochaines ventes iront dans un nouveau reversement). */
+  lockPayout(payoutId: string) {
+    const p = this.db.payouts.get(payoutId);
+    if (!p || (p.status !== "queued" && p.status !== "failed")) return null;
+    const u = this.db.users.get(p.userId);
+    return this.db.payouts.update(p.id, { status: "sending", attempts: p.attempts + 1, phone: u?.payoutPhone ?? null, network: u?.payoutNetwork ?? null, updatedAt: this.iso() });
+  }
+
+  recordPayout(payoutId: string, r: { status: "sending" | "sent" | "failed" | "manual"; gatewayId?: string | null; error?: string | null }) {
+    const p = this.db.payouts.get(payoutId);
+    if (!p) return null;
+    const next = this.db.payouts.update(p.id, { status: r.status, gatewayId: r.gatewayId ?? p.gatewayId, error: r.error ?? null, updatedAt: this.iso() });
+    if (r.status === "sent" && p.status !== "sent") this.notify(p.userId, "Vos gains sont arrivés", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/organisateur");
+    if (r.status === "manual" && p.status !== "manual")
+      for (const u of this.db.users.filter((x) => this.team.can(x, "team.manage"))) this.notify(u.id, "Reversement à faire", `${p.amount.toLocaleString("fr-FR")} FCFA à envoyer à un organisateur : ${r.error ?? ""}`, "/tobe");
+    return next;
+  }
+
+  /** Numéro Mobile Money où l'organisateur reçoit ses gains. */
+  setPayoutAccount(userId: string, input: { phone: string; network: PayoutNetwork }) {
+    const user = this.requireUser(userId);
+    const digits = String(input.phone ?? "").replace(/\D/g, "");
+    const local = digits.startsWith("228") && digits.length === 11 ? digits.slice(3) : digits;
+    if (!/^[79]\d{7}$/.test(local)) throw new ApiError(400, "Numéro Mobile Money togolais invalide (8 chiffres, ex. 90 12 34 56)");
+    if (!["moov", "togocel", "mixx"].includes(input.network)) throw new ApiError(400, "Réseau inconnu");
+    this.db.users.update(user.id, { payoutPhone: local, payoutNetwork: input.network });
+    return this.myEarnings(user.id);
+  }
+
+  /** Gains de l'organisateur : ce qui attend, ce qui est parti. */
+  myEarnings(userId: string) {
+    const user = this.requireUser(userId);
+    const list = this.db.payouts.filter((p) => p.userId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const sum = (f: (p: Payout) => boolean) => list.filter(f).reduce((n, p) => n + p.amount, 0);
+    return {
+      phone: user.payoutPhone ?? null,
+      network: user.payoutNetwork ?? null,
+      pending: sum((p) => p.status !== "sent"),
+      sent: sum((p) => p.status === "sent"),
+      min: PRICING.payoutMin,
+      commission: { ticket: PRICING.ticketCommission, vote: PRICING.voteCommission, cagnotte: PRICING.cagnotteCommission },
+      payouts: list.slice(0, 30).map((p) => ({ id: p.id, amount: p.amount, status: p.status, createdAt: p.createdAt, updatedAt: p.updatedAt, eventTitle: p.eventId ? (this.db.events.get(p.eventId)?.title ?? null) : null })),
+    };
+  }
+
+  /** Espace ToBe : paiements reçus et reversements. */
+  adminPayments(userId: string) {
+    this.requireAdmin(userId, "team.manage");
+    const intents = this.db.intents.all().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const paid = intents.filter((i) => i.status === "paid");
+    const revenue = this.db.payments.filter((p) => !!p.intentId).reduce((n, p) => n + p.platformFee, 0);
+    return {
+      totals: { collected: paid.reduce((n, i) => n + i.amount, 0), commission: revenue, toPay: this.db.payouts.filter((p) => p.status !== "sent").reduce((n, p) => n + p.amount, 0) },
+      intents: intents.slice(0, 40).map((i) => ({ id: i.id, description: i.description, amount: i.amount, status: i.status, error: i.error, createdAt: i.createdAt, user: this.db.users.get(i.userId)?.name ?? "?" })),
+      payouts: this.db.payouts
+        .all()
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, 60)
+        .map((p) => {
+          const u = this.db.users.get(p.userId);
+          return { ...p, organizer: u?.name ?? "?", phone: p.phone ?? u?.payoutPhone ?? null, network: p.network ?? u?.payoutNetwork ?? null };
+        }),
+    };
+  }
+
+  /** Reversement fait à la main depuis le tableau de bord SasPay, ou à relancer. */
+  adminPayoutAction(userId: string, payoutId: string, action: "done" | "retry") {
+    this.requireAdmin(userId, "team.manage");
+    const p = this.db.payouts.get(payoutId);
+    if (!p) throw new ApiError(404, "Reversement introuvable");
+    if (action === "done") this.recordPayout(p.id, { status: "sent", error: null });
+    else this.db.payouts.update(p.id, { status: "failed", attempts: 0, error: null, updatedAt: new Date(0).toISOString() });
+    return this.adminPayments(userId);
   }
 
   // =====================================================================
   // Billetterie
   // =====================================================================
-  buyTickets(userId: string, idOrSlug: string, input: { ticketTypeId: string; qty: number; method: PayMethod; code?: string | null }): Order {
+  buyTickets(userId: string, idOrSlug: string, input: { ticketTypeId: string; qty: number; method: PayMethod; code?: string | null }, settle?: PaymentIntent | null): Order {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
-    if (!this.canView(e, user, input.code)) throw new ApiError(403, "Accès réservé aux invités");
-    if (!this.isUpcoming(e)) throw new ApiError(400, "Cet événement est terminé");
+    if (!settle && !this.canView(e, user, input.code)) throw new ApiError(403, "Accès réservé aux invités");
+    if (!settle && !this.isUpcoming(e)) throw new ApiError(400, "Cet événement est terminé");
     if (e.access === "none") throw new ApiError(400, "Pas de billetterie ToBe pour cet événement : voyez les infos d'entrée de l'organisateur");
     const tt = e.ticketTypes.find((t) => t.id === input.ticketTypeId);
     if (!tt) throw new ApiError(400, "Type de billet introuvable");
     const qty = Math.round(input.qty);
     if (qty < 1 || qty > 10) throw new ApiError(400, "Entre 1 et 10 billets par commande");
-    if (tt.quota && tt.sold + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold)} place(s) disponible(s)`);
+    // Places déjà en cours de paiement (moins de 30 minutes) : réservées pour leurs acheteurs.
+    const holding = settle ? 0 : this.heldTickets(tt.id);
+    if (!settle && tt.quota && tt.sold + holding + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold - holding)} place(s) disponible(s)`);
     const online = this.opts.paymentsEnabled && tt.price > 0;
-    if (online && input.method === "cash") throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
+    if (online && input.method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
+    if (this.needsCheckout(tt.price * qty, settle))
+      return this.openIntent(user.id, { kind: "ticket", eventId: e.id, ticketTypeId: tt.id, qty, code: input.code ?? null }, tt.price * qty, e.id, `${qty} billet${qty > 1 ? "s" : ""} ${tt.name} · ${e.title}`) as unknown as Order;
     const organizer = this.db.users.get(e.organizerId);
     const fee = online ? ticketFee(tt.price, !!organizer?.pro) * qty : 0;
     const total = tt.price * qty + fee;
@@ -888,7 +1120,7 @@ export class ToBeService {
     };
     this.db.orders.insert(order);
     this.db.events.update(e.id, (ev) => ({ ...ev, ticketTypes: ev.ticketTypes.map((t) => (t.id === tt.id ? { ...t, sold: t.sold + qty } : t)) }));
-    if (online && total > 0) this.pay(user.id, "ticket", order.id, e.id, total, fee, input.method);
+    if (online && total > 0) this.pay(user.id, "ticket", order.id, e.id, total, settle ? Math.round(total * PRICING.ticketCommission) : fee, input.method, settle, settle ? e.organizerId : null);
     // Billet pris : rappels automatiques 2 jours avant, la veille, le jour J et 30 minutes avant.
     this.reminders.add(e, { userId: user.id, subId: null }, "ticket");
     return order;
@@ -978,13 +1210,13 @@ export class ToBeService {
     return this.contestView(e.contestId, userId);
   }
 
-  vote(userId: string, contestId: string, input: { candidateId: string; pack: "free" | "1" | "10" | "50"; method?: PayMethod }) {
+  vote(userId: string, contestId: string, input: { candidateId: string; pack: "free" | "1" | "10" | "50"; method?: PayMethod }, settle?: PaymentIntent | null) {
     const user = this.requireUser(userId);
     const c = this.db.contests.get(contestId);
     if (!c) throw new ApiError(404, "Concours introuvable");
     const now = this.now();
-    if (new Date(c.opensAt) > now) throw new ApiError(400, "Le vote n'est pas encore ouvert");
-    if (new Date(c.closesAt) <= now) throw new ApiError(400, "Le vote est clôturé");
+    if (!settle && new Date(c.opensAt) > now) throw new ApiError(400, "Le vote n'est pas encore ouvert");
+    if (!settle && new Date(c.closesAt) <= now) throw new ApiError(400, "Le vote est clôturé");
     const cand = c.candidates.find((x) => x.id === input.candidateId);
     if (!cand) throw new ApiError(404, "Candidat introuvable");
     let count = 1;
@@ -998,18 +1230,22 @@ export class ToBeService {
     } else {
       if (c.mode === "free") throw new ApiError(400, "Ce concours n'a que des votes gratuits");
       this.requirePayments("Votes payants");
-      if (!input.method || input.method === "cash") throw new ApiError(400, "Choisissez un moyen de paiement");
+      if (!this.opts.checkout && (!input.method || input.method === "cash")) throw new ApiError(400, "Choisissez un moyen de paiement");
       const p = votePackPrice(c.votePrice, input.pack);
       count = p.votes;
       amount = p.price;
       kind = "paid";
+      if (this.needsCheckout(amount, settle)) {
+        const ev = this.db.events.get(c.eventId);
+        return this.openIntent(user.id, { kind: "vote", contestId: c.id, candidateId: cand.id, pack: input.pack }, amount, c.eventId, `${count} vote${count > 1 ? "s" : ""} pour ${cand.name}${ev ? ` · ${ev.title}` : ""}`) as never;
+      }
     }
-    const rec = this.db.votes.insert({ id: newId("vot"), contestId: c.id, candidateId: cand.id, userId: user.id, count, amount, kind, method: kind === "paid" ? input.method! : null, createdAt: this.iso() });
+    const rec = this.db.votes.insert({ id: newId("vot"), contestId: c.id, candidateId: cand.id, userId: user.id, count, amount, kind, method: kind === "paid" ? (settle ? "online" : input.method!) : null, createdAt: this.iso() });
     this.db.contests.update(c.id, (cc) => ({
       ...cc,
       candidates: cc.candidates.map((x) => (x.id === cand.id ? { ...x, freeVotes: x.freeVotes + (kind === "free" ? count : 0), paidVotes: x.paidVotes + (kind === "paid" ? count : 0) } : x)),
     }));
-    if (amount > 0) this.pay(user.id, "vote", rec.id, c.eventId, amount, Math.round(amount * PRICING.voteCommission), input.method!);
+    if (amount > 0) this.pay(user.id, "vote", rec.id, c.eventId, amount, Math.round(amount * PRICING.voteCommission), input.method ?? "online", settle, settle ? (this.db.events.get(c.eventId)?.organizerId ?? null) : null);
     return { vote: rec, contest: this.contestView(c.id, user.id) };
   }
 
@@ -1084,16 +1320,18 @@ export class ToBeService {
     return { ...cg, eventTitle: e?.title ?? "", eventId: e?.id ?? null, eventSlug: e?.slug ?? null, theme: e?.theme ?? "or", category: e?.category ?? "autre", contributions, isOrganizer: manage };
   }
 
-  contribute(userId: string, cagnotteId: string, input: { amount: number; message?: string; anonymous?: boolean; method: PayMethod; name?: string; code?: string | null }) {
+  contribute(userId: string, cagnotteId: string, input: { amount: number; message?: string; anonymous?: boolean; method: PayMethod; name?: string; code?: string | null }, settle?: PaymentIntent | null) {
     const user = this.requireUser(userId);
     const cg = this.db.cagnottes.get(cagnotteId);
     if (!cg) throw new ApiError(404, "Cagnotte introuvable");
     const e = this.db.events.get(cg.eventId);
-    if (e && !this.canView(e, user, input.code)) throw new ApiError(403, "Cagnotte réservée aux invités");
+    if (!settle && e && !this.canView(e, user, input.code)) throw new ApiError(403, "Cagnotte réservée aux invités");
     this.requirePayments("Contributions");
     const amount = Math.round(input.amount);
     if (!(amount >= 500)) throw new ApiError(400, "Contribution minimale : 500 FCFA");
-    if (input.method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (input.method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (this.needsCheckout(amount, settle))
+      return this.openIntent(user.id, { kind: "contribution", cagnotteId: cg.id, amount, message: input.message, anonymous: input.anonymous, name: input.name, code: input.code ?? null }, amount, cg.eventId, `Contribution à « ${cg.title} »`) as never;
     const c = this.db.contributions.insert({
       id: newId("ctb"),
       cagnotteId: cg.id,
@@ -1102,12 +1340,12 @@ export class ToBeService {
       amount,
       message: (input.message ?? "").trim().slice(0, 280),
       anonymous: !!input.anonymous,
-      method: input.method,
+      method: settle ? "online" : input.method,
       createdAt: this.iso(),
     });
     const isNewContributor = !this.db.contributions.some((x) => x.cagnotteId === cg.id && x.userId === user.id && x.id !== c.id);
     this.db.cagnottes.update(cg.id, { collected: cg.collected + amount, contributors: cg.contributors + (isNewContributor ? 1 : 0) });
-    this.pay(user.id, "contribution", c.id, cg.eventId, amount, Math.round(amount * PRICING.cagnotteCommission), input.method);
+    this.pay(user.id, "contribution", c.id, cg.eventId, amount, Math.round(amount * PRICING.cagnotteCommission), input.method, settle, settle ? (e?.organizerId ?? null) : null);
     return this.getCagnotte(cg.id, user.id, input.code);
   }
 
@@ -1241,33 +1479,36 @@ export class ToBeService {
   // =====================================================================
   // Monétisation organisateur et participant
   // =====================================================================
-  buyBoost(userId: string, idOrSlug: string, plan: BoostPlan, method: PayMethod) {
+  buyBoost(userId: string, idOrSlug: string, plan: BoostPlan, method: PayMethod, settle?: PaymentIntent | null) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
-    if (!this.canManage(e, user)) throw new ApiError(403, "Réservé à l'organisateur");
+    if (!settle && !this.canManage(e, user)) throw new ApiError(403, "Réservé à l'organisateur");
     this.requirePayments("Boost");
     const p = PRICING.boosts[plan];
     if (!p) throw new ApiError(400, "Formule inconnue");
-    if (method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (this.needsCheckout(p.price, settle)) return this.openIntent(user.id, { kind: "boost", eventId: e.id, plan }, p.price, e.id, `Boost « ${p.label} » · ${e.title}`) as never;
     const base = this.isBoosted(e) ? new Date(e.boostedUntil!) : this.now();
     const until = new Date(base.getTime() + p.hours * 3600_000).toISOString();
     this.db.events.update(e.id, { boostedUntil: until });
-    this.pay(user.id, "boost", e.id, e.id, p.price, p.price, method);
+    this.pay(user.id, "boost", e.id, e.id, p.price, p.price, method, settle);
     return { boostedUntil: until };
   }
 
-  subscribe(userId: string, plan: "premium" | "pro", method: PayMethod) {
+  subscribe(userId: string, plan: "premium" | "pro", method: PayMethod, settle?: PaymentIntent | null) {
     const user = this.requireUser(userId);
     this.requirePayments("Abonnements");
-    if (method === "cash") throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    const price = plan === "premium" ? PRICING.premiumMonthly : PRICING.proMonthly;
+    if (this.needsCheckout(price, settle)) return this.openIntent(user.id, { kind: "subscription", plan }, price, null, plan === "premium" ? "Pass ToBe Premium · 1 mois" : "ToBe Organisateur Pro · 1 mois") as never;
     if (plan === "premium") {
       const base = user.premiumUntil && new Date(user.premiumUntil) > this.now() ? new Date(user.premiumUntil) : this.now();
       const until = new Date(base.getTime() + 30 * DAY).toISOString();
       this.db.users.update(user.id, { premiumUntil: until });
-      this.pay(user.id, "premium", user.id, null, PRICING.premiumMonthly, PRICING.premiumMonthly, method);
+      this.pay(user.id, "premium", user.id, null, PRICING.premiumMonthly, PRICING.premiumMonthly, method, settle);
     } else {
       this.db.users.update(user.id, { pro: true });
-      this.pay(user.id, "pro", user.id, null, PRICING.proMonthly, PRICING.proMonthly, method);
+      this.pay(user.id, "pro", user.id, null, PRICING.proMonthly, PRICING.proMonthly, method, settle);
     }
     return this.me(user.id);
   }
@@ -1281,7 +1522,8 @@ export class ToBeService {
       const acc = this.team.access(e, user);
       const orders = this.db.orders.filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved"));
       const sold = orders.reduce((s, o) => s + o.qty, 0);
-      const ticketRevenue = orders.reduce((s, o) => s + o.unitPrice * o.qty, 0);
+      // Recette nette organisateur : commission ToBe déduite des billets payés en ligne.
+      const ticketRevenue = orders.reduce((s, o) => s + (o.method === "online" ? Math.round(o.unitPrice * o.qty * (1 - PRICING.ticketCommission)) : o.unitPrice * o.qty), 0);
       const scanned = orders.reduce((s, o) => s + o.scannedCount, 0);
       const contest = e.contestId ? this.db.contests.get(e.contestId) : undefined;
       const votes = contest ? contest.candidates.reduce((s, c) => s + c.freeVotes + c.paidVotes, 0) : 0;

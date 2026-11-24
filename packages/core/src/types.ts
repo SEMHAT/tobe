@@ -18,7 +18,7 @@ export type Visibility = "public" | "unlisted" | "private";
 export type Access = "free" | "paid" | "invite" | "none";
 export type Reach = "quartier" | "ville" | "national" | "international";
 export type ImpactTier = "local" | "ville" | "majeur" | "phare";
-export type PayMethod = "mixx" | "moov" | "card" | "cash";
+export type PayMethod = "mixx" | "moov" | "card" | "cash" | "online";
 export type Theme = "roi" | "or" | "corail" | "nuit" | "vert" | "violet" | "sobre";
 
 export interface User {
@@ -39,6 +39,60 @@ export interface User {
   googleId?: string | null;
   premiumUntil: string | null;
   pro: boolean;
+  /** Où l'organisateur reçoit ses gains (Mobile Money Togo). */
+  payoutPhone?: string | null;
+  payoutNetwork?: PayoutNetwork | null;
+}
+
+/** Réseaux Mobile Money pour recevoir ses gains. */
+export type PayoutNetwork = "moov" | "togocel" | "mixx";
+
+/** Ce qu'un paiement en ligne doit déclencher une fois confirmé. */
+export type IntentAction =
+  | { kind: "ticket"; eventId: string; ticketTypeId: string; qty: number; code?: string | null }
+  | { kind: "vote"; contestId: string; candidateId: string; pack: string }
+  | { kind: "contribution"; cagnotteId: string; amount: number; message?: string; anonymous?: boolean; name?: string; code?: string | null }
+  | { kind: "boost"; eventId: string; plan: string }
+  | { kind: "subscription"; plan: "premium" | "pro" };
+
+/** Paiement en ligne en cours (page de paiement SasPay). */
+export interface PaymentIntent {
+  id: string;
+  userId: string;
+  action: IntentAction;
+  eventId: string | null;
+  /** Montant payé par le client, hors frais Mobile Money (ajoutés par SasPay). */
+  amount: number;
+  description: string;
+  status: "created" | "pending" | "paid" | "failed" | "expired";
+  gatewaySessionId: string | null;
+  checkoutUrl: string | null;
+  transactionId: string | null;
+  /** Ce qui a été créé une fois payé (commande, vote…), pour y renvoyer le client. */
+  resultRef: string | null;
+  resultLink: string | null;
+  error: string | null;
+  createdAt: string;
+  paidAt: string | null;
+}
+
+/** Reversement de la part de l'organisateur sur son Mobile Money. */
+export interface Payout {
+  id: string;
+  userId: string;
+  eventId: string | null;
+  /** Paiements (PaymentIntent) dont ce reversement est la part organisateur. */
+  intentIds: string[];
+  amount: number;
+  phone: string | null;
+  network: PayoutNetwork | null;
+  /** queued : en attente · sending : envoyé à SasPay · sent : reçu · failed : échec (sera retenté) · manual : à faire depuis le tableau de bord SasPay */
+  status: "queued" | "sending" | "sent" | "failed" | "manual";
+  gatewayId: string | null;
+  attempts: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Session {
@@ -250,6 +304,11 @@ export interface Payment {
   amount: number; // payé par le client
   platformFee: number; // revenu de la plateforme
   method: PayMethod;
+  /** Paiement SasPay à l'origine (absent pour l'ancien mode simulé). */
+  intentId?: string | null;
+  /** Part reversée à l'organisateur (montant − commission ToBe), 0 si tout revient à ToBe. */
+  organizerShare?: number;
+  organizerId?: string | null;
   createdAt: string;
 }
 

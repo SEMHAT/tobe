@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
-import { profilEledji, runApi, sessionUser, type PgPool } from "./_lib/store.js";
+import { profilEledji, runApiWithPayments, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
 
@@ -45,7 +45,18 @@ export default async function handler(req: Req, res: ServerResponse) {
       return send(res, 200, { url: blob.url });
     }
 
-    let body: unknown = req.body;
+    // Webhook SasPay : on garde le corps brut (signature), avant que Vercel ne le transforme.
+    let rawText: string | null = null;
+    if (sub === "saspay/webhook" && req.method === "POST") {
+      const chunks: Buffer[] = [];
+      try {
+        for await (const c of req) chunks.push(c as Buffer);
+      } catch {
+        /* corps déjà lu */
+      }
+      rawText = Buffer.concat(chunks).toString("utf8");
+    }
+    let body: unknown = rawText !== null ? (rawText ? JSON.parse(rawText) : {}) : req.body;
     if (req.method !== "GET" && (body === undefined || Buffer.isBuffer(body) || typeof body === "string")) {
       const raw = typeof body === "string" ? body : (await rawBody(req)).toString("utf8");
       body = raw ? JSON.parse(raw) : {};
@@ -53,7 +64,16 @@ export default async function handler(req: Req, res: ServerResponse) {
     const query: Record<string, string> = {};
     url.searchParams.forEach((v, k) => (query[k] = v));
     const eledji = sub === "auth/eledji" && req.method === "POST" ? await profilEledji(pool, req.headers.cookie) : undefined;
-    const r = await runApi(pool, process.env, { method: req.method ?? "GET", path: `/${sub}`, query, body, token, eledji: eledji ?? undefined });
+    const header = (n: string) => {
+      const v = req.headers[n];
+      return Array.isArray(v) ? v[0] : (v ?? null);
+    };
+    const r = await runApiWithPayments(
+      pool,
+      process.env,
+      { method: req.method ?? "GET", path: `/${sub}`, query, body, token, eledji: eledji ?? undefined },
+      rawText !== null ? { body: rawText, signature: header("x-webhook-signature"), timestamp: header("x-webhook-timestamp") } : undefined,
+    );
     return send(res, r.status, r.body);
   } catch (e) {
     console.error(e);

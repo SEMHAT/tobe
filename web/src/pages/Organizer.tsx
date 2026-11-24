@@ -27,6 +27,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { eventPath } from "../components/events";
+import { EarningsCard } from "../components/Earnings";
 import { EventTeam } from "../components/TeamInvite";
 import { PayPicker } from "../components/pay";
 import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
@@ -86,6 +87,11 @@ export function Organizer() {
       {error && <ErrorState message={error.message} onRetry={reload} />}
       {data && (
         <>
+          {data.events.some((r) => r.myRole === "owner") && (
+            <div className="px-5 pt-4 lg:px-0">
+              <EarningsCard />
+            </div>
+          )}
           {(data.events.length === 0 || data.events.some((r) => r.myRole === "owner")) && <div className="grid grid-cols-2 gap-3 px-5 pt-4 lg:grid-cols-4 lg:px-0">
             <Stat label="Recettes nettes" value={formatFcfa(data.totals.revenue)} />
             <Stat label="Billets" value={compact(data.totals.sold)} />

@@ -13,7 +13,8 @@ export interface RouteCtx {
   query: Record<string, string | undefined>;
   body: any;
   /** Données vérifiées par le serveur avant l'appel (jamais lues dans la requête). */
-  verified: { google?: GoogleProfile; eledji?: EledjiProfile };
+  /** Rempli par le serveur seulement (jamais par le client). `internal` : appel de la couche paiement. */
+  verified: { google?: GoogleProfile; eledji?: EledjiProfile; internal?: boolean };
 }
 
 type Handler = (svc: ToBeService, ctx: RouteCtx) => unknown;
@@ -25,6 +26,10 @@ interface Route {
   handler: Handler;
 }
 
+const b = (ctx: RouteCtx) => (ctx.body ?? {}) as Record<string, unknown>;
+const internal = (ctx: RouteCtx) => {
+  if (!ctx.verified.internal) throw new ApiError(404, "Route inconnue");
+};
 const need = (ctx: RouteCtx) => {
   if (!ctx.userId) throw new ApiError(401, "Connectez-vous pour continuer");
   return ctx.userId;
@@ -125,6 +130,26 @@ export const routes: Route[] = [
   { method: "GET", path: "/events/:id/remind", handler: (s, c) => s.reminders.status(c.userId, c.params.id, c.query.endpoint) },
   { method: "POST", path: "/events/:id/remind", handler: (s, c) => s.reminders.follow(c.userId, c.params.id, c.body ?? {}) },
   { method: "POST", path: "/events/:id/unremind", handler: (s, c) => s.reminders.unfollow(c.userId, c.params.id, c.body ?? {}) },
+  // Paiement en ligne : statut pour la page de retour, gains de l'organisateur, suivi ToBe.
+  { method: "GET", path: "/payments/:id", handler: (s, c) => s.paymentStatus(c.userId, c.params.id) },
+  { method: "POST", path: "/payments/:id/verify", handler: (s, c) => s.paymentStatus(c.userId, c.params.id) },
+  { method: "GET", path: "/me/earnings", handler: (s, c) => s.myEarnings(need(c)) },
+  { method: "POST", path: "/me/payout-account", handler: (s, c) => s.setPayoutAccount(need(c), c.body as never) },
+  { method: "GET", path: "/admin/payments", handler: (s, c) => s.adminPayments(need(c)) },
+  { method: "POST", path: "/admin/payouts/:id/done", handler: (s, c) => s.adminPayoutAction(need(c), c.params.id, "done") },
+  { method: "POST", path: "/admin/payouts/:id/retry", handler: (s, c) => s.adminPayoutAction(need(c), c.params.id, "retry") },
+  { method: "POST", path: "/cron/payments", handler: () => ({ ok: true }) },
+  { method: "POST", path: "/saspay/webhook", handler: () => ({ ok: true }) },
+  // Réservé à la couche paiement du serveur (appels à SasPay hors transaction).
+  { method: "GET", path: "/internal/intents/pending", handler: (s, c) => (internal(c), s.pendingIntents()) },
+  { method: "GET", path: "/internal/intents/:id", handler: (s, c) => (internal(c), s.intentForCheckout(c.params.id)) },
+  { method: "POST", path: "/internal/intents/:id/attach", handler: (s, c) => (internal(c), s.attachCheckout(c.params.id, String(b(c).sessionId), String(b(c).url))) },
+  { method: "POST", path: "/internal/intents/:id/fail", handler: (s, c) => (internal(c), s.failIntent(c.params.id, b(c).status === "expired" ? "expired" : "failed", (b(c).error as string) ?? null)) },
+  { method: "POST", path: "/internal/intents/:id/settle", handler: (s, c) => (internal(c), s.settleIntent(c.params.id, (b(c).transactionId as string) ?? null)) },
+  { method: "GET", path: "/internal/payouts/due", handler: (s, c) => (internal(c), s.duePayouts()) },
+  { method: "GET", path: "/internal/payouts/sending", handler: (s, c) => (internal(c), s.sendingPayouts()) },
+  { method: "POST", path: "/internal/payouts/:id/lock", handler: (s, c) => (internal(c), s.lockPayout(c.params.id)) },
+  { method: "POST", path: "/internal/payouts/:id/record", handler: (s, c) => (internal(c), s.recordPayout(c.params.id, b(c) as never)) },
   { method: "GET", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
   { method: "POST", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
 
@@ -171,7 +196,7 @@ export interface ApiResult {
 /** Exécute une requête de l'API sur un service. Ne lève jamais : renvoie un statut HTTP. */
 export function handleApi(
   svc: ToBeService,
-  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; verified?: { google?: GoogleProfile; eledji?: EledjiProfile } },
+  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; verified?: { google?: GoogleProfile; eledji?: EledjiProfile; internal?: boolean } },
 ): ApiResult {
   const m = matchRoute(req.method.toUpperCase(), req.path);
   if (!m) return { status: 404, body: { error: "Route inconnue" } };

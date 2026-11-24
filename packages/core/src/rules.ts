@@ -2,10 +2,15 @@ import type { Category, ImpactTier, Reach, TobeEvent } from "./types.js";
 
 // ---------- Tarifs (FCFA) — un seul endroit pour les changer ----------
 export const PRICING = {
-  ticketFeeRate: 0.06, // frais de service billetterie payés par l'acheteur
-  ticketFeeRatePro: 0.04, // organisateurs abonnés Pro
-  voteCommission: 0.15, // part de la plateforme sur les votes payants
+  // L'acheteur paie le prix affiché (+ frais Mobile Money de l'agrégateur) ; ToBe prélève sa
+  // commission sur la recette et reverse le reste à l'organisateur.
+  ticketFeeRate: 0, // plus de frais de service ajoutés à l'acheteur
+  ticketFeeRatePro: 0,
+  ticketCommission: 0.15, // part ToBe sur chaque billet vendu
+  voteCommission: 0.1, // part ToBe sur les votes payants
   cagnotteCommission: 0.04,
+  /** Reversement automatique dès que la part due à l'organisateur atteint ce montant (FCFA). */
+  payoutMin: 1000,
   premiumMonthly: 1000, // Pass ToBe Premium
   proMonthly: 15000, // abonnement Organisateur Pro
   boosts: {
@@ -220,6 +225,7 @@ export const PAY_METHOD_LABELS = {
   moov: "Moov Money",
   card: "Carte bancaire",
   cash: "Sur place",
+  online: "Mobile Money",
 } as const;
 
 export const TOBE_SERVICES = [

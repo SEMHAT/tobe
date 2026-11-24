@@ -1,5 +1,5 @@
 import type { ClientError, EventCard, Provider, TobeRequest } from "@tobe/core";
-import { Bug, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
+import { Bug, Banknote, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
 import { useState } from "react";
 import { InviteSheet, type InviteResult } from "../components/TeamInvite";
 import { Avatar } from "../components/visual";
@@ -202,6 +202,7 @@ export function TobeAdmin() {
         </div>
         {can("club.manage") && <ClubAdmin />}
         <TeamAdmin />
+        {can("team.manage") && <PaymentsAdmin />}
         {can("team.manage") && <ErrorsAdmin />}
       </div>
     </div>
@@ -502,6 +503,109 @@ function ErrorsAdmin() {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+interface PaymentsData {
+  totals: { collected: number; commission: number; toPay: number };
+  intents: { id: string; description: string; amount: number; status: string; error: string | null; createdAt: string; user: string }[];
+  payouts: { id: string; organizer: string; amount: number; status: "queued" | "sending" | "sent" | "failed" | "manual"; phone: string | null; network: string | null; error: string | null; updatedAt: string; attempts: number }[];
+}
+
+const PAYOUT_LABEL: Record<PaymentsData["payouts"][number]["status"], string> = { queued: "En attente", sending: "Envoyé, en confirmation", sent: "Reçu", failed: "Échec, nouvel essai", manual: "À faire à la main" };
+const INTENT_LABEL: Record<string, string> = { created: "Ouvert", pending: "En attente", paid: "Payé", failed: "Échoué", expired: "Expiré" };
+
+/** Paiements Mobile Money reçus et reversements aux organisateurs. */
+function PaymentsAdmin() {
+  const { toast, paymentsMode } = useSession();
+  const { data, setData } = useLoad(() => api<PaymentsData>("GET", "/admin/payments"), []);
+  if (!data || paymentsMode !== "online") return null;
+  const act = async (id: string, a: "done" | "retry") => {
+    if (a === "done" && !confirm("Confirmez que ce montant a bien été envoyé à l'organisateur depuis le tableau de bord SasPay.")) return;
+    try {
+      setData(await api<PaymentsData>("POST", `/admin/payouts/${id}/${a}`));
+      toast(a === "done" ? "Reversement marqué comme fait" : "Nouvel essai programmé");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const todo = data.payouts.filter((p) => p.status === "manual" || p.status === "failed");
+  return (
+    <section className="rounded-[24px] border border-line bg-card p-4 lg:p-6">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold">
+        <Banknote className="size-5 text-brand" /> Paiements et reversements
+      </h2>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        {[
+          ["Encaissé", data.totals.collected],
+          ["Commission ToBe", data.totals.commission],
+          ["À reverser", data.totals.toPay],
+        ].map(([l, v]) => (
+          <div key={l as string} className="rounded-2xl bg-card-2 p-3">
+            <div className="text-xs text-muted">{l}</div>
+            <div className="font-display font-bold">{formatFcfa(v as number)}</div>
+          </div>
+        ))}
+      </div>
+      {todo.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <h3 className="text-sm font-bold">À traiter</h3>
+          {todo.map((p) => (
+            <div key={p.id} className="rounded-2xl border border-coral/40 bg-coral/5 p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <b>{p.organizer}</b>
+                <b className="font-display">{formatFcfa(p.amount)}</b>
+              </div>
+              <div className="text-xs text-muted">
+                {p.network ?? "?"} · +228 {p.phone ?? "?"} · {PAYOUT_LABEL[p.status]}
+              </div>
+              {p.error && <div className="mt-1 text-xs text-coral">{p.error}</div>}
+              <div className="mt-2 flex gap-2">
+                <button className="rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white" onClick={() => act(p.id, "done")}>
+                  Envoyé à la main
+                </button>
+                <button className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold" onClick={() => act(p.id, "retry")}>
+                  Réessayer
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <h3 className="mt-4 text-sm font-bold">Derniers paiements</h3>
+      {data.intents.length === 0 ? (
+        <p className="mt-1 text-sm text-muted">Aucun paiement pour l'instant.</p>
+      ) : (
+        <ul className="mt-1 divide-y divide-line text-sm">
+          {data.intents.slice(0, 15).map((i) => (
+            <li key={i.id} className="flex items-center gap-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate">{i.description}</span>
+                <span className="text-xs text-muted">
+                  {i.user} · {ago(i.createdAt)} · {INTENT_LABEL[i.status] ?? i.status}
+                  {i.error ? ` · ${i.error}` : ""}
+                </span>
+              </span>
+              <b className="font-display">{formatFcfa(i.amount)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="mt-4 text-sm font-bold">Reversements</h3>
+      <ul className="mt-1 divide-y divide-line text-sm">
+        {data.payouts.slice(0, 15).map((p) => (
+          <li key={p.id} className="flex items-center gap-3 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{p.organizer}</span>
+              <span className="text-xs text-muted">
+                {ago(p.updatedAt)} · {PAYOUT_LABEL[p.status]}
+              </span>
+            </span>
+            <b className="font-display">{formatFcfa(p.amount)}</b>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

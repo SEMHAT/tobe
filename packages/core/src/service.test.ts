@@ -49,7 +49,7 @@ test("admin par e-mail", () => {
 });
 
 test("frais de billet et impact", () => {
-  assert.equal(ticketFee(5000), 300);
+  assert.equal(ticketFee(5000), 0); // plus de frais ajoutés à l'acheteur : ToBe prélève sa commission sur la recette
   assert.equal(computeImpact({ expectedAttendance: 1500, reach: "national", category: "concert", views: 0, ticketTypes: [] }).tier, "majeur");
   assert.equal(computeImpact({ expectedAttendance: 30, reach: "quartier", category: "anniversaire", views: 0, ticketTypes: [] }).tier, "local");
 });
@@ -71,12 +71,12 @@ test("sans paiement en ligne : billet réservé, à régler à l'entrée", () =>
   assert.throws(() => svc.buyBoost(org.id, "evt_afronight", "jour", "mixx"), /bientôt/);
 });
 
-test("avec paiement en ligne : frais et paiement enregistré", () => {
+test("avec paiement en ligne : paiement enregistré, prix affiché sans frais ajoutés", () => {
   const { svc, login } = setup({ payments: true });
   const buyer = login("ama@exemple.tg").user;
   const o = svc.buyTickets(buyer.id, "lome-afro-night", { ticketTypeId: "tkt_afro_std", qty: 1, method: "moov" });
   assert.equal(o.status, "paid");
-  assert.equal(o.total, 5200); // organisateur Pro : 4 %
+  assert.equal(o.total, 5000);
   const r = svc.vote(buyer.id, "cnt_miss", { candidateId: "cdt_miss_5", pack: "10", method: "moov" });
   assert.equal(r.vote.amount, 900);
 });

@@ -12,3 +12,5 @@ jobs:
     steps:
       - name: Envoyer les rappels arrivés à échéance
         run: curl -fsS -m 90 --retry 2 -X POST https://tobe.eledji.com/api/cron/reminders
+      - name: Vérifier les paiements et envoyer les gains des organisateurs
+        run: curl -fsS -m 120 --retry 2 -X POST https://tobe.eledji.com/api/cron/payments

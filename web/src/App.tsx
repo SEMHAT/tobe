@@ -18,6 +18,7 @@ import { NotFound } from "./pages/NotFound";
 import { Club } from "./pages/Club";
 import { Invitation } from "./pages/Invitation";
 import { EditEvent } from "./pages/EditEvent";
+import { PaymentReturn } from "./pages/PaymentReturn";
 import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
@@ -49,6 +50,7 @@ export function App() {
           <Route path="/organisateur" element={<Organizer />} />
           <Route path="/organisateur/:id" element={<OrganizerEvent />} />
           <Route path="/organisateur/:id/modifier" element={<EditEvent />} />
+          <Route path="/paiement/:id" element={<PaymentReturn />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/prestataires" element={<Providers />} />
           <Route path="/tobe" element={<TobeAdmin />} />

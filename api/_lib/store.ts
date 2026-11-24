@@ -1,5 +1,5 @@
 import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
-import { COLLECTIONS, createDb, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
+import { COLLECTIONS, createDb, createSasPay, runWithPayments, type Gateway, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
 export interface PgClient {
@@ -32,6 +32,8 @@ export function serviceOptions(env: Record<string, string | undefined>) {
   return {
     adminEmails: list(env.ADMIN_EMAILS),
     paymentsEnabled: env.PAYMENTS_ENABLED === "true",
+    // Paiement réel dès que la clé secrète SasPay est configurée sur Vercel.
+    checkout: !!env.SASPAY_SECRET_KEY,
     exposeOtp: env.EXPOSE_OTP === "true",
     googleClientId: env.GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID,
     sendCode: (email: string, code: string) => sendLoginCode(email, code, env),
@@ -47,13 +49,13 @@ export function serviceOptions(env: Record<string, string | undefined>) {
 export async function runApi(
   pool: PgPool,
   env: Record<string, string | undefined>,
-  req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null; eledji?: EledjiProfile },
+  req: { method: string; path: string; query?: Record<string, string | undefined>; body?: unknown; token?: string | null; eledji?: EledjiProfile; internal?: boolean },
 ): Promise<ApiResult> {
   await ensureSchema(pool);
   // Vérifications externes (Google) avant d'ouvrir la transaction.
   const pre = await preVerify(req, env);
   if (pre.error) return pre.error;
-  const full = { ...req, verified: { ...pre.verified, eledji: req.eledji } };
+  const full = { ...req, verified: { ...pre.verified, eledji: req.eledji, internal: req.internal === true } };
   const attempt = async (lock: boolean): Promise<ApiResult | null> => {
     const client = await pool.connect();
     try {
@@ -158,4 +160,27 @@ export async function profilEledji(pool: PgPool, cookie: string | undefined): Pr
   } finally {
     c.release();
   }
+}
+
+let gatewayCache: { key: string; gw: Gateway } | null = null;
+/** Connecteur SasPay si la clé secrète est configurée (SASPAY_SECRET_KEY), sinon rien. */
+export function gatewayFrom(env: Record<string, string | undefined>): Gateway | null {
+  const key = env.SASPAY_SECRET_KEY?.trim();
+  if (!key) return null;
+  if (gatewayCache?.key !== key) gatewayCache = { key, gw: createSasPay({ secretKey: key, baseUrl: env.SASPAY_BASE_URL || undefined }) };
+  return gatewayCache.gw;
+}
+
+/** L'API complète, paiements compris : les appels à SasPay se font entre deux transactions. */
+export function runApiWithPayments(
+  pool: PgPool,
+  env: Record<string, string | undefined>,
+  req: { method: string; path: string; query: Record<string, string | undefined>; body: unknown; token: string | null; eledji?: EledjiProfile },
+  raw?: { body: string; signature?: string | null; timestamp?: string | null },
+) {
+  return runWithPayments(
+    (r) => runApi(pool, env, { method: r.method, path: r.path, query: r.query ?? {}, body: r.body, token: r.token ?? null, eledji: req.eledji, internal: r.verified?.internal === true }),
+    { gateway: gatewayFrom(env), publicUrl: env.PUBLIC_URL || "https://tobe.eledji.com", webhookSecret: env.SASPAY_WEBHOOK_SECRET || null, raw },
+    req,
+  );
 }

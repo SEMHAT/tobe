@@ -117,6 +117,11 @@ export async function api<T = any>(method: "GET" | "POST" | "PATCH" | "DELETE", 
     throw new HttpError(res.status, data.error ?? "Erreur", data);
   }
   if (method === "GET") garderCopie(cle, data);
+  // Achat payant : direction la page de paiement sécurisée (Mobile Money). Le retour se fait sur /paiement/:id.
+  if (data && typeof data === "object" && typeof (data as { checkoutUrl?: unknown }).checkoutUrl === "string") {
+    window.location.assign((data as { checkoutUrl: string }).checkoutUrl);
+    return new Promise<T>(() => {});
+  }
   return data as T;
 }
 

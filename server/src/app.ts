@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import cors from "cors";
 import express, { type Request } from "express";
-import { handleApi, preVerify, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
+import { createSasPay, handleApi, preVerify, runWithPayments, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
 import { ensureVapid, webPushSender } from "@tobe/core/src/node/webpush";
 import { config } from "./config";
 
@@ -11,7 +11,7 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   const cfg = { ...config, ...opts };
   if (cfg.seed) seedDb(db);
   const vapid = ensureVapid(db, process.env);
-  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
+  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, checkout: !!process.env.SASPAY_SECRET_KEY, googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
 
   const app = express();
   app.disable("x-powered-by");
@@ -21,7 +21,9 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
       origin: (origin, cb) => cb(null, !origin || cfg.corsOrigins.includes("*") || cfg.corsOrigins.includes(origin) || /^capacitor:\/\/|^https?:\/\/localhost/.test(origin)),
     }),
   );
-  app.use(express.json({ limit: "4mb" }));
+  // Webhook SasPay : corps brut conservé pour la signature.
+  app.use(express.json({ limit: "4mb", verify: (req, _res, buf) => void ((req as Request & { rawBody?: string }).rawBody = buf.toString("utf8")) }));
+  const gateway = process.env.SASPAY_SECRET_KEY ? createSasPay({ secretKey: process.env.SASPAY_SECRET_KEY, baseUrl: process.env.SASPAY_BASE_URL || undefined }) : null;
 
   // Limite simple contre les abus sur l'envoi de codes : 5 demandes par adresse et par heure.
   const otpHits = new Map<string, number[]>();
@@ -52,14 +54,11 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   app.use("/api", async (req, res) => {
     const pre = await preVerify({ method: req.method, path: req.path, body: req.body }, { GOOGLE_CLIENT_ID: cfg.googleClientId });
     if (pre.error) return void res.status(pre.error.status).json(pre.error.body);
-    const r = handleApi(svc, {
-      method: req.method,
-      path: req.path,
-      query: req.query as Record<string, string>,
-      body: req.body,
-      token: token(req),
-      verified: pre.verified,
-    });
+    const r = await runWithPayments(
+      async (q) => handleApi(svc, { method: q.method, path: q.path, query: (q.query ?? {}) as Record<string, string>, body: q.body, token: q.token ?? null, verified: { ...pre.verified, internal: q.verified?.internal === true } }),
+      { gateway, publicUrl: process.env.PUBLIC_URL || `http://localhost:${cfg.port}`, webhookSecret: process.env.SASPAY_WEBHOOK_SECRET || null, raw: { body: (req as Request & { rawBody?: string }).rawBody ?? "", signature: req.get("x-webhook-signature"), timestamp: req.get("x-webhook-timestamp") } },
+      { method: req.method, path: req.path, query: req.query as Record<string, string>, body: req.body, token: token(req) },
+    );
     const pending = svc.pending.splice(0);
     void Promise.all(pending).then(() => {
       for (const id of svc.goneSubs.splice(0)) if (db.pushSubs.get(id)) db.pushSubs.remove(id);
