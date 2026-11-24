@@ -1,5 +1,6 @@
+import { Link } from "react-router-dom";
 import type { ClientError, EventCard, Provider, TobeRequest } from "@tobe/core";
-import { Bug, Banknote, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
+import { Bug, Banknote, ShieldAlert, BadgeCheck, Gift, ShieldCheck, UserPlus, Users, Mail, Phone, Plus, Sparkles, Store, Trophy } from "lucide-react";
 import { useState } from "react";
 import { InviteSheet, type InviteResult } from "../components/TeamInvite";
 import { Avatar } from "../components/visual";
@@ -202,6 +203,7 @@ export function TobeAdmin() {
         </div>
         {can("club.manage") && <ClubAdmin />}
         <TeamAdmin />
+        {can("providers.moderate") && <ModerationAdmin />}
         {can("team.manage") && <PaymentsAdmin />}
         {can("team.manage") && <ErrorsAdmin />}
       </div>
@@ -606,6 +608,155 @@ function PaymentsAdmin() {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+interface ModEvent { id: string; slug: string; title: string; startsAt: string; organizerName: string; organizerVerified: boolean; moderation: "review" | "suspended" | null; reason: string | null; reports: number; paid: boolean }
+interface ModData {
+  verifications: { userId: string; email: string; events: number; fullName: string; phone: string; orgName: string; link: string; about: string; submittedAt: string }[];
+  events: ModEvent[];
+  reports: { id: string; reason: string; details: string; createdAt: string; by: string; event: ModEvent | null }[];
+  unverifiedSelling: ModEvent[];
+}
+
+/** Garde-fous : vérifier les organisateurs, trancher sur les doublons et les signalements. */
+function ModerationAdmin() {
+  const { toast } = useSession();
+  const { data, setData } = useLoad(() => api<ModData>("GET", "/admin/moderation"), []);
+  if (!data) return null;
+  const run = async (p: Promise<ModData>, ok: string) => {
+    try {
+      setData(await p);
+      toast(ok);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const verify = (id: string, decision: "verified" | "rejected") => {
+    const reason = decision === "rejected" ? (prompt("Motif du refus (envoyé à l'organisateur)") ?? "") : "";
+    if (decision === "rejected" && !reason) return;
+    void run(api<ModData>("POST", `/admin/verifications/${id}`, { decision, reason }), decision === "verified" ? "Organisateur vérifié : ventes ouvertes" : "Demande refusée");
+  };
+  const moderate = (id: string, action: "approve" | "suspend") => {
+    const reason = action === "suspend" ? (prompt("Motif (envoyé à l'organisateur)") ?? "") : "";
+    if (action === "suspend" && !reason) return;
+    void run(api<ModData>("POST", `/admin/events/${id}/moderation`, { action, reason }), action === "approve" ? "Événement validé" : "Événement retiré, reversements bloqués");
+  };
+  const wa = (phone: string) => `https://wa.me/${phone.replace(/\D/g, "").length === 8 ? "228" : ""}${phone.replace(/\D/g, "")}`;
+  const total = data.verifications.length + data.events.length + data.reports.length;
+  const Ev = ({ e }: { e: ModEvent }) => (
+    <div className="rounded-2xl border border-line p-3 text-sm">
+      <Link to={`/evenement/${e.slug}`} className="font-semibold underline-offset-2 hover:underline">
+        {e.title}
+      </Link>
+      <div className="text-xs text-muted">
+        {e.organizerName} {e.organizerVerified ? "· vérifié" : "· non vérifié"} · {e.startsAt.slice(0, 10)}
+        {e.reports ? ` · ${e.reports} signalement(s)` : ""}
+      </div>
+      {e.reason && <div className="mt-1 text-xs text-coral">{e.reason}</div>}
+      <div className="mt-2 flex gap-2">
+        {e.moderation !== null && (
+          <button className="rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white" onClick={() => moderate(e.id, "approve")}>
+            Valider
+          </button>
+        )}
+        {e.moderation !== "suspended" && (
+          <button className="rounded-full border border-coral px-3 py-1.5 text-xs font-semibold text-coral" onClick={() => moderate(e.id, "suspend")}>
+            Retirer
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  return (
+    <section className="rounded-[24px] border border-line bg-card p-4 lg:p-6">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold">
+        <ShieldAlert className="size-5 text-brand" /> Garde-fous {total > 0 && <span className="rounded-full bg-coral px-2 py-0.5 text-xs text-white">{total}</span>}
+      </h2>
+      <p className="mt-1 text-xs text-muted">Organisateurs à vérifier avant d'ouvrir leurs ventes, événements qui ressemblent à un autre, signalements du public.</p>
+
+      <h3 className="mt-4 text-sm font-bold">Organisateurs à vérifier</h3>
+      {data.verifications.length === 0 ? (
+        <p className="text-sm text-muted">Aucune demande.</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {data.verifications.map((v) => (
+            <div key={v.userId} className="rounded-2xl border border-line p-3 text-sm">
+              <div className="font-semibold">
+                {v.fullName} · {v.orgName}
+              </div>
+              <div className="text-xs text-muted">
+                {v.email} · {v.events} événement(s) · {ago(v.submittedAt)}
+              </div>
+              {v.link && (
+                <a href={/^https?:/.test(v.link) ? v.link : `https://${v.link}`} target="_blank" rel="noreferrer" className="mt-1 block truncate text-xs text-brand">
+                  {v.link}
+                </a>
+              )}
+              {v.about && <p className="mt-1 text-xs">{v.about}</p>}
+              <p className="mt-2 text-xs text-muted">Appelez-le en vidéo sur WhatsApp : pièce d'identité, nom identique, page officielle à son nom.</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <a href={wa(v.phone)} target="_blank" rel="noreferrer" className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold">
+                  WhatsApp {v.phone}
+                </a>
+                <button className="rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white" onClick={() => verify(v.userId, "verified")}>
+                  Vérifié
+                </button>
+                <button className="rounded-full border border-coral px-3 py-1.5 text-xs font-semibold text-coral" onClick={() => verify(v.userId, "rejected")}>
+                  Refuser
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {data.events.length > 0 && (
+        <>
+          <h3 className="mt-4 text-sm font-bold">Événements en vérification ou retirés</h3>
+          <div className="mt-2 space-y-2">
+            {data.events.map((e) => (
+              <Ev key={e.id} e={e} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {data.reports.length > 0 && (
+        <>
+          <h3 className="mt-4 text-sm font-bold">Signalements</h3>
+          <ul className="mt-1 divide-y divide-line text-sm">
+            {data.reports.map((r) => (
+              <li key={r.id} className="py-2">
+                <b>{r.event?.title ?? "?"}</b> · {r.reason}
+                <div className="text-xs text-muted">
+                  par {r.by} · {ago(r.createdAt)}
+                  {r.details ? ` · « ${r.details} »` : ""}
+                </div>
+                {r.event && !r.event.moderation && (
+                  <button className="mt-1 rounded-full border border-coral px-3 py-1 text-xs font-semibold text-coral" onClick={() => moderate(r.event!.id, "suspend")}>
+                    Retirer l'événement
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {data.unverifiedSelling.length > 0 && (
+        <>
+          <h3 className="mt-4 text-sm font-bold">Événements payants en attente (organisateur non vérifié)</h3>
+          <ul className="mt-1 text-sm text-muted">
+            {data.unverifiedSelling.map((e) => (
+              <li key={e.id}>
+                {e.title} · {e.organizerName}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

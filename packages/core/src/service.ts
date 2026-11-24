@@ -48,7 +48,7 @@ import type {
 } from "./types.js";
 
 import { ApiError } from "./errors.js";
-import type { IntentAction, PaymentIntent, Payout, PayoutNetwork } from "./types.js";
+import type { EventReport, IntentAction, PaymentIntent, Payout, PayoutNetwork } from "./types.js";
 export { ApiError };
 
 export interface ServiceOptions {
@@ -107,6 +107,11 @@ export interface EventView extends Omit<TobeEvent, "accessCode" | "invitees"> {
   photoCount: number;
   myTickets: number;
   organizerPro: boolean;
+  organizerVerified: boolean;
+  /** Raison pour laquelle on ne peut pas acheter en ligne (null : ventes ouvertes). */
+  salesBlocked: string | null;
+  moderation: "review" | "suspended" | null;
+  moderationReason: string | null;
   /** Rôle de l'utilisateur sur cet événement (organisateur, équipe ToBe, co-organisateur, contrôleur, photographe). */
   myRole: "owner" | "staff" | "co_organisateur" | "controleur" | "photographe" | null;
   canScan: boolean;
@@ -492,7 +497,7 @@ export class ToBeService {
 
   listEvents(filters: { q?: string; category?: string; when?: string; price?: string; sort?: string; past?: boolean } = {}): EventCard[] {
     const now = this.now();
-    let list = this.db.events.filter((e) => e.visibility === "public" && (filters.past ? !this.isUpcoming(e) : this.isUpcoming(e)));
+    let list = this.db.events.filter((e) => e.visibility === "public" && !e.moderation && (filters.past ? !this.isUpcoming(e) : this.isUpcoming(e)));
     if (filters.category && filters.category !== "all") list = list.filter((e) => e.category === filters.category);
     if (filters.q) {
       const q = slugify(filters.q).replace(/-/g, " ");
@@ -575,6 +580,9 @@ export class ToBeService {
   getEvent(idOrSlug: string, userId: string | null, code?: string | null): EventView {
     const e = this.findEvent(idOrSlug);
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
+    // Événement en vérification ou suspendu : visible seulement par son équipe et par ToBe.
+    if (e.moderation && !(user && (this.team.access(e, user).role || this.team.can(user, "providers.moderate"))))
+      throw new ApiError(e.moderation === "suspended" ? 410 : 403, e.moderation === "suspended" ? "Cet événement a été retiré par ToBe." : "Cet événement est en cours de vérification par l'équipe ToBe. Revenez un peu plus tard.");
     if (!this.canView(e, user, code)) {
       throw new ApiError(403, "Cet événement est privé. Entrez le code d'accès reçu avec votre invitation.", {
         needCode: true,
@@ -604,6 +612,10 @@ export class ToBeService {
       attendees: this.attendees(ev),
       photoCount: this.db.photos.filter((p) => p.eventId === ev.id).length,
       organizerPro: !!this.db.users.get(ev.organizerId)?.pro,
+      organizerVerified: this.isVerifiedOrganizer(ev.organizerId),
+      salesBlocked: this.salesBlocked(ev),
+      moderation: ev.moderation ?? null,
+      moderationReason: manage ? (ev.moderationReason ?? null) : null,
       myTickets: user ? this.db.orders.filter((o) => o.eventId === ev.id && o.userId === user.id && (o.status === "paid" || o.status === "reserved")).reduce((s, o) => s + o.qty, 0) : 0,
     };
   }
@@ -669,7 +681,17 @@ export class ToBeService {
       tobeRequestId: null,
       createdAt: this.iso(),
     };
+    // Garde-fou : même titre (ou presque) et dates proches qu'un événement d'un autre organisateur.
+    const twin = this.lookalike(event);
+    if (twin && !this.team.can(user, "events.all")) {
+      event.moderation = "review";
+      event.moderationReason = `Ressemble à « ${twin.title} » (${twin.organizerName}) prévu le ${twin.startsAt.slice(0, 10)}`;
+    }
     this.db.events.insert(event);
+    if (event.moderation) {
+      this.notifyModerators("Événement à vérifier", `« ${event.title} » de ${user.name || user.email} ressemble à un événement existant.`, "/tobe");
+      this.notify(user.id, "Votre événement est en vérification", "Il ressemble à un événement déjà publié par un autre organisateur. L'équipe ToBe le vérifie, en général en quelques heures.", `/organisateur/${event.id}`);
+    }
 
     if (input.options.votes && input.contest) {
       const c = input.contest;
@@ -805,6 +827,15 @@ export class ToBeService {
       next.ticketTypes = types;
     }
 
+    // Garde-fou : un titre ou une date qui ferait ressembler l'événement à celui d'un autre organisateur.
+    if ((next.title || next.startsAt) && !e.moderation && !this.team.can(user, "events.all")) {
+      const twin = this.lookalike({ ...e, ...next } as TobeEvent);
+      if (twin) {
+        next.moderation = "review";
+        next.moderationReason = `Ressemble à « ${twin.title} » (${twin.organizerName}) prévu le ${twin.startsAt.slice(0, 10)}`;
+        this.notifyModerators("Événement à vérifier", `« ${next.title ?? e.title} » a été modifié et ressemble à un événement existant.`, "/tobe");
+      }
+    }
     const updated = this.db.events.update(e.id, { ...next, updatedAt: this.iso() });
 
     // Prévenir les participants et les personnes qui ont demandé un rappel.
@@ -883,6 +914,137 @@ export class ToBeService {
       paidAt: null,
     });
     return { checkout: { intentId: intent.id, amount: intent.amount } };
+  }
+
+  // ---------- Garde-fous contre les faux événements ----------
+
+  /** Organisateur vérifié par ToBe (ou membre de l'équipe ToBe). */
+  isVerifiedOrganizer(userId: string) {
+    const u = this.db.users.get(userId);
+    return !!u && (u.verification?.status === "verified" || this.team.can(u, "events.all"));
+  }
+
+  /** Pourquoi les ventes en ligne sont fermées (null si ouvertes). */
+  private salesBlocked(e: TobeEvent): string | null {
+    if (e.moderation === "suspended") return "Événement retiré par ToBe";
+    if (e.moderation === "review") return "Événement en cours de vérification par ToBe";
+    if (this.opts.checkout && !this.isVerifiedOrganizer(e.organizerId)) return "Ventes en ligne ouvertes dès que l'organisateur est vérifié par ToBe";
+    return null;
+  }
+
+  private assertCanSell(e: TobeEvent) {
+    const why = this.salesBlocked(e);
+    if (why) throw new ApiError(403, why);
+  }
+
+  private notifyModerators(title: string, body: string, link: string) {
+    for (const u of this.db.users.filter((x) => this.team.can(x, "providers.moderate"))) this.notify(u.id, title, body, link);
+  }
+
+  /** Événement d'un autre organisateur au titre très proche, à moins de 3 jours d'écart. */
+  private lookalike(e: TobeEvent): TobeEvent | null {
+    if (e.approvedAt) return null;
+    const words = (t: string) =>
+      new Set(
+        t
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .split(" ")
+          .filter((w) => w.length >= 3 && !["les", "des", "avec", "pour", "the", "edition", "lome", "togo"].includes(w)),
+      );
+    const a = words(e.title);
+    if (!a.size) return null;
+    const t = new Date(e.startsAt).getTime();
+    return (
+      this.db.events.find((o) => {
+        if (o.id === e.id || o.organizerId === e.organizerId || o.moderation === "suspended") return false;
+        if (Math.abs(new Date(o.startsAt).getTime() - t) > 3 * 86400_000) return false;
+        const b = words(o.title);
+        const inter = [...a].filter((w) => b.has(w)).length;
+        return inter / Math.min(a.size, b.size || 1) >= 0.6 && inter >= 1;
+      }) ?? null
+    );
+  }
+
+  /** Demande de vérification d'organisateur. */
+  requestVerification(userId: string, input: { fullName: string; phone: string; orgName: string; link?: string; about?: string }) {
+    const user = this.requireUser(userId);
+    const fullName = String(input.fullName ?? "").trim();
+    const phone = String(input.phone ?? "").replace(/[^\d+]/g, "");
+    if (fullName.length < 4) throw new ApiError(400, "Indiquez votre nom complet (comme sur votre pièce d'identité)");
+    if (phone.replace(/\D/g, "").length < 8) throw new ApiError(400, "Indiquez un numéro WhatsApp joignable");
+    if (!String(input.orgName ?? "").trim()) throw new ApiError(400, "Indiquez le nom de votre structure ou de votre événement");
+    if (user.verification?.status === "verified") return this.myVerification(user.id);
+    this.db.users.update(user.id, {
+      verification: { status: "pending", fullName, phone, orgName: String(input.orgName).trim().slice(0, 100), link: String(input.link ?? "").trim().slice(0, 300), about: String(input.about ?? "").trim().slice(0, 1000), submittedAt: this.iso(), reviewedAt: null, reviewedBy: null, reason: null },
+    });
+    this.notifyModerators("Organisateur à vérifier", `${fullName} (${String(input.orgName).trim()}) demande à vendre en ligne.`, "/tobe");
+    return this.myVerification(user.id);
+  }
+
+  myVerification(userId: string) {
+    const u = this.requireUser(userId);
+    return { verified: this.isVerifiedOrganizer(u.id), request: u.verification ?? null };
+  }
+
+  /** Signaler un événement (faux, arnaque, doublon…). 3 signalements différents : mis en vérification. */
+  reportEvent(userId: string, idOrSlug: string, input: { reason: EventReport["reason"]; details?: string }) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    if (!["faux", "arnaque", "doublon", "autre"].includes(input.reason)) throw new ApiError(400, "Choisissez un motif");
+    if (this.db.reports.some((r) => r.eventId === e.id && r.userId === user.id)) return { ok: true, already: true };
+    this.db.reports.insert({ id: newId("sig"), eventId: e.id, userId: user.id, reason: input.reason, details: String(input.details ?? "").trim().slice(0, 1000), createdAt: this.iso(), handled: false });
+    const open = this.db.reports.filter((r) => r.eventId === e.id && !r.handled).length;
+    if (open >= 3 && !e.moderation && !e.approvedAt) {
+      this.db.events.update(e.id, { moderation: "review", moderationReason: `${open} signalements de visiteurs` });
+      this.notify(e.organizerId, "Votre événement est en vérification", "Des visiteurs l'ont signalé. L'équipe ToBe vérifie et vous recontacte si besoin.", `/organisateur/${e.id}`);
+    }
+    this.notifyModerators("Événement signalé", `« ${e.title} » : ${input.reason}${open >= 3 ? ` (${open} signalements, mis en vérification)` : ""}.`, "/tobe");
+    return { ok: true };
+  }
+
+  /** Espace ToBe : vérifications, événements en attente, signalements. */
+  moderationQueue(userId: string) {
+    this.requireAdmin(userId, "providers.moderate");
+    const users = this.db.users.filter((u) => u.verification?.status === "pending");
+    const ev = (e: TobeEvent) => ({ id: e.id, slug: e.slug, title: e.title, startsAt: e.startsAt, organizerName: e.organizerName, organizerVerified: this.isVerifiedOrganizer(e.organizerId), moderation: e.moderation ?? null, reason: e.moderationReason ?? null, reports: this.db.reports.filter((r) => r.eventId === e.id && !r.handled).length, paid: e.access === "paid" });
+    return {
+      verifications: users.map((u) => ({ userId: u.id, email: u.email, events: this.db.events.filter((e) => e.organizerId === u.id).length, ...u.verification! })),
+      events: this.db.events.filter((e) => !!e.moderation).map(ev),
+      reports: this.db.reports
+        .filter((r) => !r.handled)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 50)
+        .map((r) => ({ ...r, event: this.db.events.get(r.eventId) ? ev(this.db.events.get(r.eventId)!) : null, by: this.db.users.get(r.userId)?.name ?? "?" })),
+      unverifiedSelling: this.db.events.filter((e) => e.access === "paid" && this.isUpcoming(e) && !this.isVerifiedOrganizer(e.organizerId)).map(ev),
+    };
+  }
+
+  reviewVerification(adminId: string, userId: string, input: { decision: "verified" | "rejected"; reason?: string }) {
+    const admin = this.requireAdmin(adminId, "providers.moderate");
+    const u = this.db.users.get(userId);
+    if (!u) throw new ApiError(404, "Utilisateur introuvable");
+    const base = u.verification ?? { status: "pending", fullName: u.name, phone: u.phone ?? "", orgName: "", link: "", about: "", submittedAt: this.iso(), reviewedAt: null, reviewedBy: null, reason: null };
+    this.db.users.update(u.id, { verification: { ...base, status: input.decision, reviewedAt: this.iso(), reviewedBy: admin.id, reason: input.reason?.trim() || null } });
+    if (input.decision === "verified") this.notify(u.id, "Vous êtes organisateur vérifié", "Vos ventes en ligne sont ouvertes et vos gains vous sont reversés automatiquement.", "/organisateur");
+    else this.notify(u.id, "Vérification refusée", input.reason?.trim() || "Contactez l'équipe ToBe pour en savoir plus.", "/organisateur");
+    return this.moderationQueue(adminId);
+  }
+
+  moderateEvent(adminId: string, idOrSlug: string, input: { action: "approve" | "suspend"; reason?: string }) {
+    this.requireAdmin(adminId, "providers.moderate");
+    const e = this.findEvent(idOrSlug);
+    if (input.action === "approve") {
+      this.db.events.update(e.id, { moderation: null, moderationReason: null, approvedAt: this.iso() });
+      this.notify(e.organizerId, "Événement validé", `« ${e.title} » est de nouveau visible sur ToBe.`, `/evenement/${e.slug}`);
+    } else {
+      this.db.events.update(e.id, { moderation: "suspended", moderationReason: input.reason?.trim() || "Retiré par ToBe" });
+      this.notify(e.organizerId, "Événement retiré", `« ${e.title} » a été retiré par ToBe${input.reason ? ` : ${input.reason}` : ""}. Vos reversements sont suspendus le temps de régler la situation.`, `/organisateur/${e.id}`);
+    }
+    for (const r of this.db.reports.filter((x) => x.eventId === e.id && !x.handled)) this.db.reports.update(r.id, { handled: true });
+    return this.moderationQueue(adminId);
   }
 
   /** Billets en cours de paiement depuis moins de 30 minutes (places mises de côté). */
@@ -989,6 +1151,8 @@ export class ToBeService {
       .filter((p) => {
         const u = this.db.users.get(p.userId);
         if (!u?.payoutPhone || !u.payoutNetwork) return false;
+        // Argent retenu tant que l'organisateur n'est pas vérifié ou qu'un de ses événements est suspendu.
+        if (!this.isVerifiedOrganizer(u.id) || this.db.events.some((e) => e.organizerId === u.id && e.moderation === "suspended")) return false;
         if (p.status === "queued") return p.amount >= PRICING.payoutMin;
         if (p.status === "failed") return p.attempts < 5 && now - new Date(p.updatedAt).getTime() > 10 * 60_000;
         return false;
@@ -1097,8 +1261,10 @@ export class ToBeService {
     if (!settle && tt.quota && tt.sold + holding + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold - holding)} place(s) disponible(s)`);
     const online = this.opts.paymentsEnabled && tt.price > 0;
     if (online && input.method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
-    if (this.needsCheckout(tt.price * qty, settle))
+    if (this.needsCheckout(tt.price * qty, settle)) {
+      this.assertCanSell(e);
       return this.openIntent(user.id, { kind: "ticket", eventId: e.id, ticketTypeId: tt.id, qty, code: input.code ?? null }, tt.price * qty, e.id, `${qty} billet${qty > 1 ? "s" : ""} ${tt.name} · ${e.title}`) as unknown as Order;
+    }
     const organizer = this.db.users.get(e.organizerId);
     const fee = online ? ticketFee(tt.price, !!organizer?.pro) * qty : 0;
     const total = tt.price * qty + fee;
@@ -1237,6 +1403,7 @@ export class ToBeService {
       kind = "paid";
       if (this.needsCheckout(amount, settle)) {
         const ev = this.db.events.get(c.eventId);
+        if (ev) this.assertCanSell(ev);
         return this.openIntent(user.id, { kind: "vote", contestId: c.id, candidateId: cand.id, pack: input.pack }, amount, c.eventId, `${count} vote${count > 1 ? "s" : ""} pour ${cand.name}${ev ? ` · ${ev.title}` : ""}`) as never;
       }
     }
@@ -1330,6 +1497,7 @@ export class ToBeService {
     const amount = Math.round(input.amount);
     if (!(amount >= 500)) throw new ApiError(400, "Contribution minimale : 500 FCFA");
     if (input.method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez Mobile Money ou carte");
+    if (this.needsCheckout(amount, settle) && e) this.assertCanSell(e);
     if (this.needsCheckout(amount, settle))
       return this.openIntent(user.id, { kind: "contribution", cagnotteId: cg.id, amount, message: input.message, anonymous: input.anonymous, name: input.name, code: input.code ?? null }, amount, cg.eventId, `Contribution à « ${cg.title} »`) as never;
     const c = this.db.contributions.insert({

@@ -42,6 +42,34 @@ export interface User {
   /** Où l'organisateur reçoit ses gains (Mobile Money Togo). */
   payoutPhone?: string | null;
   payoutNetwork?: PayoutNetwork | null;
+  /** Vérification d'organisateur par l'équipe ToBe : requise pour vendre en ligne et recevoir de l'argent. */
+  verification?: OrganizerVerification | null;
+}
+
+export interface OrganizerVerification {
+  status: "pending" | "verified" | "rejected";
+  fullName: string;
+  phone: string;
+  orgName: string;
+  /** Page Facebook, Instagram, site… où l'on retrouve l'organisateur. */
+  link: string;
+  /** Événements déjà organisés, références. */
+  about: string;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  reason: string | null;
+}
+
+/** Signalement d'un événement par un visiteur. */
+export interface EventReport {
+  id: string;
+  eventId: string;
+  userId: string;
+  reason: "faux" | "arnaque" | "doublon" | "autre";
+  details: string;
+  createdAt: string;
+  handled: boolean;
 }
 
 /** Réseaux Mobile Money pour recevoir ses gains. */
@@ -128,6 +156,11 @@ export interface TobeEvent {
   slug: string;
   organizerId: string;
   organizerName: string;
+  /** review : en vérification (doublon possible, signalements) · suspended : retiré par ToBe. Masqué et ventes fermées. */
+  moderation?: "review" | "suspended" | null;
+  moderationReason?: string | null;
+  /** Validé par ToBe : plus de contrôle automatique de doublon. */
+  approvedAt?: string | null;
   title: string;
   category: Category;
   startsAt: string;

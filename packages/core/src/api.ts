@@ -150,6 +150,13 @@ export const routes: Route[] = [
   { method: "GET", path: "/internal/payouts/sending", handler: (s, c) => (internal(c), s.sendingPayouts()) },
   { method: "POST", path: "/internal/payouts/:id/lock", handler: (s, c) => (internal(c), s.lockPayout(c.params.id)) },
   { method: "POST", path: "/internal/payouts/:id/record", handler: (s, c) => (internal(c), s.recordPayout(c.params.id, b(c) as never)) },
+  // Garde-fous : vérification des organisateurs, signalements, modération.
+  { method: "GET", path: "/me/verification", handler: (s, c) => s.myVerification(need(c)) },
+  { method: "POST", path: "/me/verification", handler: (s, c) => s.requestVerification(need(c), c.body as never) },
+  { method: "POST", path: "/events/:id/report", handler: (s, c) => s.reportEvent(need(c), c.params.id, c.body as never) },
+  { method: "GET", path: "/admin/moderation", handler: (s, c) => s.moderationQueue(need(c)) },
+  { method: "POST", path: "/admin/verifications/:id", handler: (s, c) => s.reviewVerification(need(c), c.params.id, c.body as never) },
+  { method: "POST", path: "/admin/events/:id/moderation", handler: (s, c) => s.moderateEvent(need(c), c.params.id, c.body as never) },
   { method: "GET", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
   { method: "POST", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
 

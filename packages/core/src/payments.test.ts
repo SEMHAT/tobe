@@ -39,7 +39,8 @@ function setup() {
   };
   const call = (method: string, path: string, token: string | null, body?: unknown) =>
     runWithPayments(async (q) => handleApi(svc, { method: q.method, path: q.path, body: q.body, token: q.token ?? null, verified: { internal: q.verified?.internal === true } }), { gateway: gw, publicUrl: "https://tobe.test" }, { method, path, token, body });
-  return { db, svc, login, call, paid, payouts, failPayout: (e: GatewayError | null) => (payoutError = e) };
+  const verify = (userId: string) => db.users.update(userId, { verification: { status: "verified", fullName: "Orga Test", phone: "90000000", orgName: "Orga", link: "", about: "", submittedAt: "", reviewedAt: "", reviewedBy: null, reason: null } });
+  return { db, svc, login, call, paid, payouts, verify, failPayout: (e: GatewayError | null) => (payoutError = e) };
 }
 
 test("billet payé en ligne : page SasPay, confirmation, billet émis, 85 % reversés à l'organisateur", async () => {
@@ -48,6 +49,7 @@ test("billet payé en ligne : page SasPay, confirmation, billet émis, 85 % reve
   const fan = t.login("fan@exemple.tg", "Fan");
   const ev = t.svc.createEvent(orga.user.id, { title: "Concert", category: "concert", startsAt: new Date(Date.now() + 5 * 86400_000).toISOString(), venue: "Palais", description: "", visibility: "public", access: "paid", ticketTypes: [{ name: "VIP", price: 10000, quota: 10 }], expectedAttendance: 100, reach: "ville", options: {} as never });
   t.svc.setPayoutAccount(orga.user.id, { phone: "90 12 34 56", network: "moov" });
+  t.verify(orga.user.id);
 
   const r = await t.call("POST", `/events/${ev.id}/tickets`, fan.token, { ticketTypeId: ev.ticketTypes[0].id, qty: 2, method: "online" });
   assert.equal(r.status, 200);
@@ -98,6 +100,7 @@ test("vote payé : 10 % pour ToBe ; IP non autorisée → reversement à faire �
   const contest = t.db.contests.all()[0];
   assert.ok(contest, "concours créé");
   t.svc.setPayoutAccount(orga.user.id, { phone: "99000000", network: "togocel" });
+  t.verify(orga.user.id);
   t.failPayout(new GatewayError("IP non autorisée", "ip_not_whitelisted", 403));
   const r = await t.call("POST", `/contests/${contest.id}/vote`, fan.token, { candidateId: contest.candidates[0].id, pack: "10" });
   const { intentId } = r.body as { intentId: string };
@@ -117,6 +120,7 @@ test("petites sommes cumulées jusqu'au seuil, et rien sans numéro de reverseme
   const t = setup();
   const orga = t.login("orga@exemple.tg", "Orga");
   const fan = t.login("fan@exemple.tg", "Fan");
+  t.verify(orga.user.id);
   const ev = t.svc.createEvent(orga.user.id, { title: "Soirée", category: "soiree", startsAt: new Date(Date.now() + 5 * 86400_000).toISOString(), venue: "Bar", description: "", visibility: "public", access: "paid", ticketTypes: [{ name: "Entrée", price: 1000, quota: 0 }], expectedAttendance: 50, reach: "quartier", options: {} as never });
   for (let i = 0; i < 2; i++) {
     const r = await t.call("POST", `/events/${ev.id}/tickets`, fan.token, { ticketTypeId: ev.ticketTypes[0].id, qty: 1 });

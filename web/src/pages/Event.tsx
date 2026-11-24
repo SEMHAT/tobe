@@ -13,6 +13,8 @@ import {
   Settings2,
   Share2,
   Pencil,
+  ShieldAlert,
+  Flag,
   Bell,
   BellRing,
   Check,
@@ -26,7 +28,7 @@ import { askNotifications } from "../components/AppPrompts";
 import { currentEndpoint, pushState } from "../lib/push";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EventMap } from "../components/Map";
-import { Button, Card, ErrorState, IconButton, PageLoader, Progress, TopBar, cx, inputCls } from "../components/ui";
+import { Button, Card, ErrorState, IconButton, PageLoader, Progress, Sheet, TopBar, cx, inputCls } from "../components/ui";
 import { Avatar, Img, Poster, TierBadge } from "../components/visual";
 import { api } from "../lib/api";
 import { CATEGORY_LABELS, compact, countdown, formatFcfa, longDate, shareUrl, time, whatsappLink } from "../lib/format";
@@ -138,13 +140,26 @@ export function EventPage() {
 
         {!ended && e.access !== "none" && <RemindCard e={e} />}
 
+        {e.moderation && (
+          <div className="mt-5 flex gap-2.5 rounded-2xl bg-[#fff4dc] p-3.5 text-sm text-[#7a4a00] dark:bg-[#3a2a08] dark:text-[#ffd98a]">
+            <ShieldAlert className="mt-0.5 size-4 shrink-0" />
+            <span>
+              <b>{e.moderation === "suspended" ? "Événement retiré par ToBe." : "En vérification par l'équipe ToBe :"}</b> {e.moderation === "suspended" ? "Il n'est plus visible et les ventes sont arrêtées." : "il est masqué du public et les ventes sont fermées le temps de la vérification."}
+              {e.moderationReason && <span className="mt-1 block text-xs opacity-80">{e.moderationReason}</span>}
+            </span>
+          </div>
+        )}
+
         <div className="mt-5 flex items-center gap-3 rounded-2xl border border-line bg-card p-3">
           <Avatar name={e.organizerName} size={42} />
           <div className="min-w-0 flex-1">
             <div className="text-xs text-muted">Organisé par</div>
-            <div className="flex items-center gap-1 truncate font-semibold">
-              {e.organizerName} <BadgeCheck className="size-4 shrink-0 text-brand" />
-            </div>
+            <div className="flex items-center gap-1 truncate font-semibold">{e.organizerName}</div>
+            {e.organizerVerified && (
+              <div className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-brand">
+                <BadgeCheck className="size-3.5" /> Organisateur vérifié par ToBe
+              </div>
+            )}
           </div>
         </div>
 
@@ -203,6 +218,7 @@ export function EventPage() {
             )}
             {e.lat !== null && e.lng !== null && <EventMap points={[{ id: e.id, lat: e.lat, lng: e.lng, title: e.title, sub: e.venue, link: "" }]} height={190} zoom={15} interactive={false} />}
             <TobeUpsell />
+            {!e.isOrganizer && <ReportEvent e={e} />}
           </div>
         )}
         {tab === "programme" && (
@@ -231,6 +247,13 @@ export function EventPage() {
 
 function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; ended: boolean }) {
   const nav = useNavigate();
+  if (!ended && e.access === "paid" && e.salesBlocked && e.myTickets === 0)
+    return (
+      <div className="flex items-center gap-3 rounded-2xl bg-card-2 p-3 text-sm">
+        <ShieldAlert className="size-5 shrink-0 text-muted" />
+        <span className="text-muted">{e.salesBlocked}</span>
+      </div>
+    );
   if (e.myTickets > 0)
     return (
       <Button full size="lg" variant="dark" icon={<Ticket className="size-5 text-brand" />} onClick={() => nav("/billets")}>
@@ -533,4 +556,51 @@ function downloadIcs(e: EventView) {
   a.href = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
   a.download = `${e.slug}.ics`;
   a.click();
+}
+
+const REPORT_REASONS: { id: "faux" | "arnaque" | "doublon" | "autre"; label: string }[] = [
+  { id: "arnaque", label: "Arnaque : on me demande de l'argent" },
+  { id: "faux", label: "Faux événement / n'existe pas" },
+  { id: "doublon", label: "Copie d'un événement d'un autre organisateur" },
+  { id: "autre", label: "Autre problème" },
+];
+
+/** Signaler l'événement à l'équipe ToBe. */
+function ReportEvent({ e }: { e: EventView }) {
+  const { me, requireAuth, toast } = useSession();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState<(typeof REPORT_REASONS)[number]["id"]>("arnaque");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      await api("POST", `/events/${e.id}/report`, { reason, details });
+      toast("Merci, l'équipe ToBe va vérifier cet événement");
+      setOpen(false);
+    } catch (err) {
+      toast((err as Error).message, "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <>
+      <button onClick={async () => { if (me || (await requireAuth("Connectez-vous pour signaler cet événement"))) setOpen(true); }} className="mx-auto flex items-center gap-1.5 py-2 text-xs font-semibold text-muted hover:text-coral">
+        <Flag className="size-3.5" /> Signaler cet événement
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Signaler cet événement">
+        <div className="space-y-2">
+          {REPORT_REASONS.map((r) => (
+            <button key={r.id} onClick={() => setReason(r.id)} className={cx("w-full rounded-2xl border p-3.5 text-left text-sm font-medium", reason === r.id ? "border-coral bg-coral/10" : "border-line")}>
+              {r.label}
+            </button>
+          ))}
+          <textarea className={`${inputCls} min-h-20`} placeholder="Détails (facultatif) : ce qui vous paraît suspect" value={details} onChange={(ev) => setDetails(ev.target.value)} maxLength={1000} />
+          <Button full loading={busy} onClick={send}>
+            Envoyer le signalement
+          </Button>
+        </div>
+      </Sheet>
+    </>
+  );
 }

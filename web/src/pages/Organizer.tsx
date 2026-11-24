@@ -28,6 +28,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { eventPath } from "../components/events";
 import { EarningsCard } from "../components/Earnings";
+import { VerificationCard } from "../components/Verification";
 import { EventTeam } from "../components/TeamInvite";
 import { PayPicker } from "../components/pay";
 import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
@@ -88,7 +89,8 @@ export function Organizer() {
       {data && (
         <>
           {data.events.some((r) => r.myRole === "owner") && (
-            <div className="px-5 pt-4 lg:px-0">
+            <div className="space-y-4 px-5 pt-4 lg:px-0">
+              <VerificationCard sellsOnline={data.events.some((r) => r.myRole === "owner" && r.event.access === "paid")} />
               <EarningsCard />
             </div>
           )}
