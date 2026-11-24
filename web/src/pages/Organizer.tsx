@@ -1,6 +1,7 @@
 import type { EventCard, EventView, PayMethod } from "@tobe/core";
 import { PRICING, type BoostPlan } from "@tobe/core";
 import {
+  WifiOff,
   BarChart3,
   ChevronRight,
   Pencil,
@@ -28,12 +29,14 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { eventPath } from "../components/events";
 import { EarningsCard } from "../components/Earnings";
+import { CancelEventButton } from "../components/Refunds";
 import { EventProofCard, VerificationCard } from "../components/Verification";
 import { EventTeam } from "../components/TeamInvite";
 import { PayPicker } from "../components/pay";
 import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, Stat, TopBar, cx, inputCls } from "../components/ui";
 import { Poster, TierBadge } from "../components/visual";
-import { api, uploadImage } from "../lib/api";
+import { api, HttpError, uploadImage } from "../lib/api";
+import { downloadManifest, loadManifest, markScanned, pendingScans, scanLocally, syncScans } from "../lib/offlineScan";
 import { faceDescriptors, loadFaceApi } from "../lib/face";
 import { compact, formatFcfa, shareUrl, shortDate, whatsappLink } from "../lib/format";
 import { resizeImage } from "../lib/media";
@@ -117,6 +120,7 @@ export function Organizer() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <TierBadge tier={r.event.impact.tier} className="h-5 px-2 text-[10px]" />
+                        {r.event.cancelled && <span className="rounded-full bg-coral/15 px-2 py-0.5 text-[10px] font-bold text-coral">Annulé</span>}
                         {r.event.moderation && <span className="rounded-full bg-[#fff4dc] px-2 py-0.5 text-[10px] font-bold text-[#7a4a00]">{r.event.moderation === "review" ? "En attente de validation" : "Retiré"}</span>}
                         {!r.upcoming && <span className="text-xs text-faint">Terminé</span>}
                         {r.event.visibility === "private" && <Lock className="size-3.5 text-faint" />}
@@ -351,6 +355,7 @@ export function OrganizerEvent() {
           </div>
         )}
         <EventTeam eventId={ev.id} />
+        {acc.delete && r.sold > 0 && r.upcoming && !r.event.cancelled && <CancelEventButton eventId={ev.id} sold={r.sold} onDone={() => (reload(), nav(`/evenement/${ev.slug}`))} />}
         {acc.delete && r.sold === 0 && (
           <Button
             full
@@ -560,7 +565,9 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
   );
 }
 
-type ScanResult = { ok: true; holder: string; remaining: number; eventTitle: string; amountDue: number; order: { ticketTypeName: string; qty: number } } | { ok: false; reason: string };
+type ScanResult =
+  | { ok: true; holder: string; remaining: number; eventTitle: string; amountDue: number; order: { ticketTypeName: string; qty: number; code?: string }; warning?: string | null; offline?: boolean }
+  | { ok: false; reason: string; offline?: boolean };
 
 export function Scanner() {
   const [sp] = useSearchParams();
@@ -573,18 +580,53 @@ export function Scanner() {
   const [count, setCount] = useState(0);
   const lock = useRef(false);
   const { me, ready, requireAuth } = useSession();
+  const [offline, setOffline] = useState<{ tickets: number; at: string; pending: number } | null>(null);
+  const [syncMsg, setSyncMsg] = useState("");
+
+  const refreshOffline = () => {
+    if (!eventId) return;
+    const m = loadManifest(eventId);
+    setOffline(m ? { tickets: m.tickets.length, at: m.generatedAt, pending: pendingScans(eventId).length } : null);
+  };
+
+  // Liste des billets gardée sur le téléphone + envoi des entrées en attente dès que le réseau revient.
+  useEffect(() => {
+    if (!eventId || !me) return;
+    const sync = async () => {
+      try {
+        const r = await syncScans(eventId);
+        if (!pendingScans(eventId).length) await downloadManifest(eventId);
+        if (r.accepted || r.conflicts.length) setSyncMsg(`${r.accepted} entrée(s) hors connexion envoyée(s)${r.conflicts.length ? ` · ${r.conflicts.length} billet(s) passé(s) deux fois : ${r.conflicts.map((c) => c.code).join(", ")}` : ""}`);
+      } catch {
+        /* toujours hors connexion */
+      }
+      refreshOffline();
+    };
+    sync();
+    const id = setInterval(sync, 30_000);
+    window.addEventListener("online", sync);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("online", sync);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventId, me?.user.id]);
 
   const check = async (raw: string) => {
     if (lock.current) return;
     lock.current = true;
+    let r: ScanResult;
     try {
-      const r = await api<ScanResult>("POST", "/tickets/scan", { code: raw, eventId });
-      setResult(r);
-      if (r.ok) setCount((c) => c + 1);
-      navigator.vibrate?.(r.ok ? 80 : [60, 60, 60]);
+      r = await api<ScanResult>("POST", "/tickets/scan", { code: raw, eventId });
+      if (r.ok && eventId && r.order.code) markScanned(eventId, r.order.code);
     } catch (e) {
-      setResult({ ok: false, reason: (e as Error).message });
+      // Pas de réseau : on vérifie avec la liste gardée sur le téléphone.
+      r = e instanceof HttpError && e.status === 0 && eventId ? scanLocally(eventId, raw) : { ok: false, reason: (e as Error).message };
+      refreshOffline();
     }
+    setResult(r);
+    if (r.ok) setCount((c) => c + 1);
+    navigator.vibrate?.(r.ok ? 80 : [60, 60, 60]);
     setTimeout(() => (lock.current = false), 1800);
   };
 
@@ -669,14 +711,32 @@ export function Scanner() {
                 {result.holder} · {result.order.qty} × {result.order.ticketTypeName}
                 {result.amountDue > 0 && <div className="mt-2 rounded-xl bg-white/20 px-3 py-2 text-lg font-bold">À encaisser : {formatFcfa(result.amountDue)}</div>}
                 {result.remaining > 0 && <div className="font-semibold">Encore {result.remaining} entrée(s) sur ce billet</div>}
+                {result.warning && <div className="mt-2 rounded-xl bg-black/20 px-3 py-2 text-sm font-semibold">{result.warning}</div>}
+                {result.offline && <div className="mt-2 text-xs text-white/80">Validé hors connexion · sera envoyé au retour du réseau</div>}
               </div>
             ) : (
               <div className="mt-1 text-white/90">{result.reason}</div>
             )}
           </div>
         )}
-        <div className="mt-6 flex items-center gap-2 rounded-2xl bg-card p-4 text-xs text-muted">
-          <Wallet className="size-4 shrink-0 text-brand" /> Chaque billet ne peut être validé qu'autant de fois qu'il compte de places.
+        {eventId && (
+          <div className="mt-6 flex items-start gap-2 rounded-2xl bg-card p-4 text-xs text-muted">
+            <WifiOff className="mt-0.5 size-4 shrink-0 text-brand" />
+            <div>
+              {offline ? (
+                <>
+                  <b className="text-ink">Prêt hors connexion</b> : {offline.tickets} billet(s) gardé(s) sur ce téléphone (mis à jour à {new Date(offline.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}).
+                  {offline.pending > 0 && <> {offline.pending} entrée(s) en attente d'envoi.</>}
+                </>
+              ) : (
+                "Téléchargement de la liste des billets pour scanner sans réseau…"
+              )}
+              {syncMsg && <div className="mt-1 font-semibold text-ink">{syncMsg}</div>}
+            </div>
+          </div>
+        )}
+        <div className="mt-3 flex items-center gap-2 rounded-2xl bg-card p-4 text-xs text-muted">
+          <Wallet className="size-4 shrink-0 text-brand" /> Chaque billet ne peut être validé qu'autant de fois qu'il compte de places. Les QR changent toutes les 30 s : une capture d'écran est refusée.
         </div>
       </div>
     </div>

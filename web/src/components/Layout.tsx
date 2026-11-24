@@ -6,6 +6,8 @@ import { InstallPrompt, NotifyPrompt, OfflineBanner } from "./AppPrompts";
 import { useRouteRobots } from "../lib/seo";
 import { SessionProvider, useSession } from "../lib/session";
 import { cx } from "./ui";
+import { useT } from "../lib/i18n";
+import { LanguagePicker } from "./LanguagePicker";
 import { Avatar, Logo, QR } from "./visual";
 
 const TABS = ["/", "/explorer", "/photos", "/profil", "/billets", "/club"];
@@ -14,6 +16,7 @@ const WIDE = ["/", "/explorer", "/organisateur", "/prestataires", "/tobe", "/pho
 
 function BottomNav() {
   const { me } = useSession();
+  const t = useT();
   const item = (to: string, label: string, Icon: typeof Home, badge?: number) => (
     <NavLink to={to} end={to === "/"} className={({ isActive }) => cx("relative flex flex-1 flex-col items-center gap-1 pt-2.5 text-[11px] font-semibold transition", isActive ? "text-brand" : "text-faint")}>
       <Icon className="size-[23px]" strokeWidth={2.1} />
@@ -24,15 +27,15 @@ function BottomNav() {
   return (
     <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-line bg-app/90 pb-safe backdrop-blur-xl lg:hidden">
       <div className="flex h-[64px] items-start">
-        {item("/", "Accueil", Home)}
-        {item("/explorer", "Explorer", Compass)}
-        <NavLink to="/creer" aria-label="Créer un événement" className="relative -mt-5 flex flex-1 justify-center">
+        {item("/", t("nav.home"), Home)}
+        {item("/explorer", t("nav.explore"), Compass)}
+        <NavLink to="/creer" aria-label={t("nav.create")} className="relative -mt-5 flex flex-1 justify-center">
           <span className="grid size-[58px] place-items-center rounded-[20px] brand-gradient text-white shadow-[0_10px_30px_-6px_rgba(24,0,173,0.55)] ring-4 ring-[var(--bg)]">
             <Plus className="size-7" strokeWidth={2.6} />
           </span>
         </NavLink>
-        {item("/photos", "Mes photos", ScanFace)}
-        {item("/profil", "Profil", User, me?.unread)}
+        {item("/photos", t("nav.photos"), ScanFace)}
+        {item("/profil", t("nav.profile"), User, me?.unread)}
       </div>
     </nav>
   );
@@ -41,6 +44,7 @@ function BottomNav() {
 function DesktopNav() {
   const { me, requireAuth } = useSession();
   const nav = useNavigate();
+  const t = useT();
   const link = (to: string, label: string) => (
     <NavLink to={to} end={to === "/"} className={({ isActive }) => cx("whitespace-nowrap rounded-full px-3 py-2 text-[15px] font-semibold transition xl:px-4", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
       {label}
@@ -53,14 +57,14 @@ function DesktopNav() {
           <Logo height={34} />
         </Link>
         <nav className="flex items-center gap-1">
-          {link("/", "Accueil")}
-          {link("/explorer", "Explorer")}
-          {link("/photos", "Mes photos")}
+          {link("/", t("nav.home"))}
+          {link("/explorer", t("nav.explore"))}
+          {link("/photos", t("nav.photos"))}
           <NavLink to="/club" className={({ isActive }) => cx("flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-2 text-[15px] font-semibold transition xl:px-4", isActive ? "bg-brand-soft text-brand" : "text-muted hover:text-ink")}>
             <Trophy className="size-4 text-[#f0a000]" /> Club
           </NavLink>
-          {!(me && me.team) && link("/prestataires", "Prestataires")}
-          {me && link("/organisateur", "Organisateur")}
+          {!(me && me.team) && link("/prestataires", t("nav.providers"))}
+          {me && link("/organisateur", t("nav.organizer"))}
           {me?.team && link("/tobe", "Agence")}
         </nav>
         <div className="ml-auto flex items-center gap-3">
@@ -107,8 +111,11 @@ function Footer() {
             <li><Link className="hover:text-ink" to="/explorer?when=weekend">Ce week-end</Link></li>
             <li><Link className="hover:text-ink" to="/photos">Pass ToBe</Link></li>
             <li><Link className="hover:text-ink" to="/securite">Payer en toute sécurité</Link></li>
+            <li><Link className="hover:text-ink" to="/observatoire">Observatoire des événements</Link></li>
+            <li><Link className="hover:text-ink" to="/confidentialite">Vos données et votre visage</Link></li>
             <li><Link className="hover:text-ink" to="/club">ToBe Club : jouer et gagner</Link></li>
           </ul>
+          <div className="mt-4"><LanguagePicker compact /></div>
         </div>
         <div>
           <div className="text-sm font-bold">Organiser</div>

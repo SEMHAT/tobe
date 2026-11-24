@@ -45,9 +45,24 @@ import type {
   TobeRequest,
   User,
   Visibility,
-} from "./types.js";
+ TicketGroup } from "./types.js";
 
 import { ApiError } from "./errors.js";
+import { checkDynamicQr, parseQr } from "./qr.js";
+import { CATEGORY_LABELS } from "./rules.js";
+
+/** Version du texte de consentement au Pass ToBe (visage). */
+export const FACE_CONSENT_VERSION = "2026-11";
+const FACE_ACCOUNT_RETENTION_MS = 365 * 86400_000;
+const FACE_PHOTO_RETENTION_MS = 182 * 86400_000;
+
+/** Réseau Mobile Money d'après le préfixe togolais (Togocel/Yas : 70-73, 90-93 · Moov : 78-79, 96-99). */
+export function guessNetwork(local: string): PayoutNetwork | null {
+  const p = Number(local.slice(0, 2));
+  if ([70, 71, 72, 73, 90, 91, 92, 93].includes(p)) return "togocel";
+  if ([78, 79, 96, 97, 98, 99].includes(p)) return "moov";
+  return null;
+}
 import type { EventReport, IntentAction, PaymentIntent, Payout, PayoutNetwork } from "./types.js";
 export { ApiError };
 
@@ -91,6 +106,7 @@ export interface EventCard {
   access: Access;
   entryInfo: string | null;
   moderation: "review" | "suspended" | null;
+  cancelled: boolean;
   verified: boolean;
   visibility: Visibility;
   priceFrom: number;
@@ -117,6 +133,7 @@ export interface EventView extends Omit<TobeEvent, "accessCode" | "invitees"> {
   proofSubmittedAt: string | null;
   /** Raison pour laquelle on ne peut pas acheter en ligne (null : ventes ouvertes). */
   salesBlocked: string | null;
+  cancelReason?: string | null;
   moderation: "review" | "suspended" | null;
   moderationReason: string | null;
   /** Rôle de l'utilisateur sur cet événement (organisateur, équipe ToBe, co-organisateur, contrôleur, photographe). */
@@ -488,6 +505,7 @@ export class ToBeService {
       access: e.access,
       entryInfo: e.access === "none" ? (e.entryInfo ?? null) : null,
       moderation: e.moderation ?? null,
+      cancelled: !!e.cancelledAt,
       verified: this.isEventVerified(e),
       visibility: e.visibility,
       priceFrom: e.access === "paid" && prices.length ? Math.min(...prices) : 0,
@@ -507,7 +525,7 @@ export class ToBeService {
 
   listEvents(filters: { q?: string; category?: string; when?: string; price?: string; sort?: string; past?: boolean } = {}): EventCard[] {
     const now = this.now();
-    let list = this.db.events.filter((e) => e.visibility === "public" && !e.moderation && (filters.past ? !this.isUpcoming(e) : this.isUpcoming(e)));
+    let list = this.db.events.filter((e) => e.visibility === "public" && !e.moderation && !e.cancelledAt && (filters.past ? !this.isUpcoming(e) : this.isUpcoming(e)));
     if (filters.category && filters.category !== "all") list = list.filter((e) => e.category === filters.category);
     if (filters.q) {
       const q = slugify(filters.q).replace(/-/g, " ");
@@ -627,6 +645,7 @@ export class ToBeService {
       proofs: manage ? (ev.proofs ?? []) : [],
       proofSubmittedAt: manage ? (ev.proofSubmittedAt ?? null) : null,
       salesBlocked: this.salesBlocked(ev),
+      cancelReason: ev.cancelledAt ? (ev.cancelReason ?? "Annulé par l'organisateur") : null,
       moderation: ev.moderation ?? null,
       moderationReason: manage ? (ev.moderationReason ?? null) : null,
       myTickets: user ? this.db.orders.filter((o) => o.eventId === ev.id && o.userId === user.id && (o.status === "paid" || o.status === "reserved")).reduce((s, o) => s + o.qty, 0) : 0,
@@ -881,11 +900,104 @@ export class ToBeService {
     return this.getEvent(e.id, user.id);
   }
 
+  /**
+   * Annuler un événement : billets invalidés, chaque acheteur en ligne est remboursé en entier (commission ToBe comprise)
+   * sur son Mobile Money. La part de l'organisateur encore en attente est annulée ; ce qui lui a déjà été versé est signalé à l'équipe.
+   */
+  cancelEvent(userId: string, idOrSlug: string, reason: string) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    const staff = this.team.can(user, "events.all");
+    if (!this.team.access(e, user).delete && !staff) throw new ApiError(403, "Seul l'organisateur peut annuler cet événement");
+    if (e.cancelledAt) throw new ApiError(400, "Événement déjà annulé");
+    const why = String(reason ?? "").trim().slice(0, 300);
+    if (why.length < 5) throw new ApiError(400, "Expliquez en quelques mots pourquoi l'événement est annulé");
+    this.db.events.update(e.id, { cancelledAt: this.iso(), cancelReason: why });
+
+    let refunds = 0;
+    let refundTotal = 0;
+    for (const o of this.db.orders.filter((x) => x.eventId === e.id && (x.status === "paid" || x.status === "reserved"))) {
+      this.db.orders.update(o.id, { status: "cancelled" });
+      const paid = this.db.payments.find((p) => p.kind === "ticket" && p.refId === o.id && !!p.intentId);
+      if (paid && paid.amount > 0) {
+        const buyer = this.db.users.get(o.userId);
+        const phone = buyer?.phone ? this.localPhone(buyer.phone) : null;
+        const network = phone ? guessNetwork(phone) : null;
+        this.db.payouts.insert({ id: newId("rmb"), userId: o.userId, eventId: e.id, intentIds: [paid.intentId!], amount: paid.amount, phone: network ? phone : null, network, status: "queued", kind: "refund", orderId: o.id, gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
+        refunds++;
+        refundTotal += paid.amount;
+        this.notify(o.userId, "Événement annulé : vous êtes remboursé", network ? `« ${e.title} » est annulé. ${paid.amount.toLocaleString("fr-FR")} FCFA reviennent sur votre Mobile Money ${phone}.` : `« ${e.title} » est annulé. Indiquez votre numéro Mobile Money pour recevoir ${paid.amount.toLocaleString("fr-FR")} FCFA.`, "/billets");
+      } else this.notify(o.userId, "Événement annulé", `« ${e.title} » est annulé : ${why}`, "/billets");
+    }
+
+    // Part de l'organisateur sur les billets de cet événement : retirée des reversements pas encore partis.
+    const ticketIntents = new Set(this.db.payments.filter((p) => p.kind === "ticket" && p.eventId === e.id && !!p.intentId).map((p) => p.intentId!));
+    const shareOf = (ids: string[]) => this.db.payments.filter((p) => p.kind === "ticket" && p.eventId === e.id && !!p.intentId && ids.includes(p.intentId)).reduce((n, p) => n + (p.organizerShare ?? 0), 0);
+    let recovered = 0;
+    for (const p of this.db.payouts.filter((x) => x.userId === e.organizerId && x.status === "queued" && (x.kind ?? "organizer") === "organizer" && x.intentIds.some((i) => ticketIntents.has(i)))) {
+      const share = Math.min(p.amount, shareOf(p.intentIds));
+      recovered += share;
+      const left = p.amount - share;
+      this.db.payouts.update(p.id, { amount: left, intentIds: p.intentIds.filter((i) => !ticketIntents.has(i)), status: left > 0 ? "queued" : "void", updatedAt: this.iso() });
+    }
+    const owed = this.db.payments.filter((p) => p.kind === "ticket" && p.eventId === e.id && !!p.intentId).reduce((n, p) => n + (p.organizerShare ?? 0), 0) - recovered;
+    this.notifyModerators(
+      "Événement annulé",
+      `« ${e.title} » annulé par ${user.name || user.email}. ${refunds} remboursement(s), ${refundTotal.toLocaleString("fr-FR")} FCFA.${owed > 0 ? ` ${owed.toLocaleString("fr-FR")} FCFA déjà versés à l'organisateur : à récupérer.` : ""}`,
+      "/tobe",
+    );
+    this.reminders.cancel(e.id);
+    for (const r of this.db.resales.filter((x) => x.eventId === e.id && x.status === "listed")) this.db.resales.update(r.id, { status: "cancelled" });
+    for (const g of this.db.groups.filter((x) => x.eventId === e.id)) this.db.groups.update(g.id, { expiresAt: this.iso() });
+    return { ok: true, refunds, refundTotal, owedByOrganizer: Math.max(0, owed) };
+  }
+
+  /** Remboursements de l'utilisateur (événements annulés). */
+  myRefunds(userId: string) {
+    const user = this.requireUser(userId);
+    return this.db.payouts
+      .filter((p) => p.userId === user.id && p.kind === "refund")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map((p) => {
+        const e = p.eventId ? this.db.events.get(p.eventId) : undefined;
+        return { id: p.id, amount: p.amount, status: p.status, phone: p.phone, network: p.network, needsNumber: !p.phone || !p.network, eventTitle: e?.title ?? "Événement", reason: e?.cancelReason ?? null, createdAt: p.createdAt };
+      });
+  }
+
+  /** L'acheteur indique (ou corrige) le numéro où recevoir son remboursement. */
+  setRefundAccount(userId: string, payoutId: string, input: { phone: string; network: PayoutNetwork }) {
+    const user = this.requireUser(userId);
+    const p = this.db.payouts.get(payoutId);
+    if (!p || p.userId !== user.id || (p.kind !== "refund" && p.kind !== "resale")) throw new ApiError(404, "Remboursement introuvable");
+    if (p.status !== "queued" && p.status !== "failed") throw new ApiError(400, "Ce remboursement est déjà en route");
+    const local = this.localPhone(input.phone);
+    if (!/^[79]\d{7}$/.test(local)) throw new ApiError(400, "Numéro Mobile Money togolais invalide (8 chiffres, ex. 90 12 34 56)");
+    if (!["moov", "togocel", "mixx"].includes(input.network)) throw new ApiError(400, "Réseau inconnu");
+    this.db.payouts.update(p.id, { phone: local, network: input.network, status: "queued", attempts: 0, error: null, updatedAt: this.iso() });
+    return this.myRefunds(user.id);
+  }
+
+  private localPhone(phone: string) {
+    const digits = String(phone ?? "").replace(/\D/g, "");
+    return digits.startsWith("228") && digits.length === 11 ? digits.slice(3) : digits.slice(-8);
+  }
+
+  /** L'équipe marque un organisateur « de confiance » : plus de séquestre sur ses billets. */
+  setTrusted(adminId: string, userId: string, trusted: boolean) {
+    this.requireAdmin(adminId, "team.manage");
+    const u = this.db.users.get(userId);
+    if (!u) throw new ApiError(404, "Utilisateur introuvable");
+    this.db.users.update(u.id, { trusted: !!trusted });
+    // Plus de séquestre sur ce qui attend déjà.
+    if (trusted) for (const p of this.db.payouts.filter((x) => x.userId === u.id && x.status === "queued" && !!x.releaseAt)) this.db.payouts.update(p.id, { releaseAt: null, updatedAt: this.iso() });
+    return this.adminPayments(adminId);
+  }
+
   deleteEvent(userId: string, idOrSlug: string) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!this.team.access(e, user).delete) throw new ApiError(403, "Seul l'organisateur peut supprimer cet événement");
-    if (this.attendees(e) > 0) throw new ApiError(400, "Des billets ont été vendus : contactez ToBe pour annuler et rembourser");
+    if (this.attendees(e) > 0) throw new ApiError(400, "Des billets ont été vendus : annulez l'événement, les acheteurs seront remboursés automatiquement");
     this.db.events.remove(e.id);
     return { ok: true };
   }
@@ -902,7 +1014,11 @@ export class ToBeService {
     const organizerShare = organizerId ? Math.max(0, amount - platformFee) : 0;
     const p = this.recordPayment({ userId, kind, refId, eventId, amount, platformFee, method: settle ? "online" : method, intentId: settle?.id ?? null, organizerShare, organizerId: organizerId ?? null });
     // Paiement réel : la part de l'organisateur part sur son Mobile Money.
-    if (settle && organizerId && organizerShare > 0) this.queuePayout(organizerId, eventId, settle.id, organizerShare);
+    if (settle && organizerId && organizerShare > 0) {
+      // Séquestre : l'argent des billets d'un organisateur pas encore « de confiance » attend la fin de l'événement + 24 h.
+      const ev = kind === "ticket" && eventId ? this.db.events.get(eventId) : undefined;
+      this.queuePayout(organizerId, eventId, settle.id, organizerShare, ev && !this.isTrusted(organizerId) ? this.escrowRelease(ev) : null);
+    }
     return p;
   }
 
@@ -946,6 +1062,7 @@ export class ToBeService {
 
   /** Pourquoi les ventes en ligne sont fermées (null si ouvertes). */
   private salesBlocked(e: TobeEvent): string | null {
+    if (e.cancelledAt) return "Événement annulé";
     if (e.moderation === "suspended") return "Événement retiré par ToBe";
     if (e.moderation === "review") return "Événement en cours de vérification par ToBe";
     if (this.opts.checkout && !this.isVerifiedOrganizer(e.organizerId)) return "Billetterie ouverte dès que l'organisateur est vérifié par ToBe";
@@ -1105,8 +1222,8 @@ export class ToBeService {
   private heldTickets(ticketTypeId: string) {
     const since = this.now().getTime() - 30 * 60_000;
     return this.db.intents
-      .filter((i) => i.action.kind === "ticket" && i.action.ticketTypeId === ticketTypeId && (i.status === "created" || i.status === "pending") && new Date(i.createdAt).getTime() > since)
-      .reduce((n, i) => n + (i.action as { qty: number }).qty, 0);
+      .filter((i) => i.action.kind === "ticket" && i.action.ticketTypeId === ticketTypeId && !i.action.group && (i.status === "created" || i.status === "pending") && new Date(i.createdAt).getTime() > since)
+      .reduce((n, i) => n + (i.action as { qty: number }).qty, 0) + this.db.groups.filter((g) => g.ticketTypeId === ticketTypeId).reduce((n, g) => n + this.groupHeld(g), 0);
   }
 
   // ---------- Paiement en ligne (SasPay) : appelé par la couche serveur, jamais directement par le client ----------
@@ -1149,12 +1266,17 @@ export class ToBeService {
     let link: string | null = null;
     try {
       if (a.kind === "ticket") {
-        const o = this.buyTickets(i.userId, a.eventId, { ticketTypeId: a.ticketTypeId, qty: a.qty, method: "online", code: a.code }, paid);
+        const o = this.buyTickets(i.userId, a.eventId, { ticketTypeId: a.ticketTypeId, qty: a.qty, method: "online", code: a.code, group: a.group ?? null }, paid);
         ref = o.id;
         link = "/billets?nouveau=1";
         const e = this.db.events.get(a.eventId);
         this.notify(i.userId, "Paiement reçu, vos billets sont prêts", `${a.qty} billet${a.qty > 1 ? "s" : ""} pour ${e?.title ?? "l'événement"}. Présentez le QR code à l'entrée.`, "/billets");
         if (e) this.notify(e.organizerId, "Nouvelle vente", `${a.qty} billet${a.qty > 1 ? "s" : ""} ${o.ticketTypeName} vendu${a.qty > 1 ? "s" : ""} pour ${e.title}.`, `/organisateur/${e.id}`);
+      } else if (a.kind === "resale") {
+        const o = this.buyResale(i.userId, a.resaleId, { method: "online" }, paid);
+        ref = o.id;
+        link = "/billets?nouveau=1";
+        this.notify(i.userId, "Billet reçu", "Votre billet acheté en revente officielle est prêt, avec un QR tout neuf.", "/billets");
       } else if (a.kind === "vote") {
         const r = this.vote(i.userId, a.contestId, { candidateId: a.candidateId, pack: a.pack as "1" | "10" | "50", method: "online" }, paid) as { vote: { id: string } };
         ref = r.vote.id;
@@ -1192,10 +1314,28 @@ export class ToBeService {
 
   // ---------- Reversements aux organisateurs ----------
 
-  private queuePayout(organizerId: string, eventId: string | null, intentId: string, amount: number) {
-    const open = this.db.payouts.find((p) => p.userId === organizerId && p.status === "queued");
+  private queuePayout(organizerId: string, eventId: string | null, intentId: string, amount: number, releaseAt: string | null = null) {
+    const open = this.db.payouts.find(
+      (p) => p.userId === organizerId && p.status === "queued" && (p.kind ?? "organizer") === "organizer" && (releaseAt ? p.releaseAt === releaseAt && p.eventId === eventId : !p.releaseAt),
+    );
     if (open) return this.db.payouts.update(open.id, { amount: open.amount + amount, intentIds: [...open.intentIds, intentId], eventId: open.eventId === eventId ? eventId : null, updatedAt: this.iso() });
-    return this.db.payouts.insert({ id: newId("vrs"), userId: organizerId, eventId, intentIds: [intentId], amount, phone: null, network: null, status: "queued", gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
+    return this.db.payouts.insert({ id: newId("vrs"), userId: organizerId, eventId, intentIds: [intentId], amount, phone: null, network: null, status: "queued", kind: "organizer", releaseAt, gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
+  }
+
+  /** Organisateur de confiance : choisi par ToBe, ou membre de l'équipe ToBe. */
+  isTrusted(userId: string) {
+    const u = this.db.users.get(userId);
+    return !!u && (!!u.trusted || this.team.can(u, "events.all"));
+  }
+
+  /** Fin de l'événement + 24 h : l'argent des billets est libéré si personne ne s'est plaint. */
+  private escrowRelease(e: TobeEvent) {
+    const end = e.endsAt ? new Date(e.endsAt).getTime() : new Date(e.startsAt).getTime() + 8 * 3600_000;
+    return new Date(end + 24 * 3600_000).toISOString();
+  }
+
+  private released(p: Payout) {
+    return !p.releaseAt || new Date(p.releaseAt).getTime() <= this.now().getTime();
   }
 
   /** Reversements prêts à partir : montant suffisant et numéro renseigné ; échecs retentés toutes les 10 minutes (5 fois). */
@@ -1203,18 +1343,26 @@ export class ToBeService {
     const now = this.now().getTime();
     return this.db.payouts
       .filter((p) => {
+        if (p.status === "failed") return p.attempts < 5 && now - new Date(p.updatedAt).getTime() > 10 * 60_000;
+        // Remboursement ou revente : l'argent part sur le numéro indiqué, quel que soit le montant.
+        if (p.kind === "refund" || p.kind === "resale") return p.status === "queued" && !!p.phone && !!p.network && p.amount > 0;
         const u = this.db.users.get(p.userId);
         if (!u?.payoutPhone || !u.payoutNetwork) return false;
+        if (!this.released(p)) return false;
         // Argent retenu tant que l'organisateur n'est pas vérifié ou qu'un de ses événements est suspendu.
         if (!this.isVerifiedOrganizer(u.id) || this.db.events.some((e) => e.organizerId === u.id && e.moderation === "suspended")) return false;
         if (p.status === "queued") return p.amount >= PRICING.payoutMin || (!!p.requested && p.amount >= PRICING.withdrawMin);
-        if (p.status === "failed") return p.attempts < 5 && now - new Date(p.updatedAt).getTime() > 10 * 60_000;
         return false;
       })
       .map((p) => {
-        const u = this.db.users.get(p.userId)!;
-        return { id: p.id, amount: p.amount, phone: u.payoutPhone!, network: u.payoutNetwork!, name: u.name, email: u.email, attempts: p.attempts };
-      });
+        const u = this.db.users.get(p.userId);
+        const own = p.kind === "refund" || p.kind === "resale";
+        const phone = own || p.status === "failed" ? (p.phone ?? u?.payoutPhone) : u?.payoutPhone;
+        const network = own || p.status === "failed" ? (p.network ?? u?.payoutNetwork) : u?.payoutNetwork;
+        const description = p.kind === "refund" ? "Remboursement ToBe" : p.kind === "resale" ? "Revente de votre billet ToBe" : "Vos gains ToBe";
+        return { id: p.id, amount: p.amount, phone: phone!, network: network!, name: u?.name ?? "Client ToBe", email: u?.email ?? "", attempts: p.attempts, description };
+      })
+      .filter((p) => !!p.phone && !!p.network);
   }
 
   /** Reversements envoyés dont on attend la confirmation. */
@@ -1227,14 +1375,17 @@ export class ToBeService {
     const p = this.db.payouts.get(payoutId);
     if (!p || (p.status !== "queued" && p.status !== "failed")) return null;
     const u = this.db.users.get(p.userId);
-    return this.db.payouts.update(p.id, { status: "sending", attempts: p.attempts + 1, phone: u?.payoutPhone ?? null, network: u?.payoutNetwork ?? null, updatedAt: this.iso() });
+    const own = p.kind === "refund" || p.kind === "resale";
+    return this.db.payouts.update(p.id, { status: "sending", attempts: p.attempts + 1, phone: own ? p.phone : (u?.payoutPhone ?? null), network: own ? p.network : (u?.payoutNetwork ?? null), updatedAt: this.iso() });
   }
 
   recordPayout(payoutId: string, r: { status: "sending" | "sent" | "failed" | "manual"; gatewayId?: string | null; error?: string | null }) {
     const p = this.db.payouts.get(payoutId);
     if (!p) return null;
     const next = this.db.payouts.update(p.id, { status: r.status, gatewayId: r.gatewayId ?? p.gatewayId, error: r.error ?? null, updatedAt: this.iso() });
-    if (r.status === "sent" && p.status !== "sent") this.notify(p.userId, "Vos gains sont arrivés", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/organisateur");
+    if (r.status === "sent" && p.status !== "sent" && p.kind === "refund") this.notify(p.userId, "Remboursement envoyé", `${p.amount.toLocaleString("fr-FR")} FCFA renvoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/billets");
+    else if (r.status === "sent" && p.status !== "sent" && p.kind === "resale") this.notify(p.userId, "Billet revendu : argent reçu", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/billets");
+    else if (r.status === "sent" && p.status !== "sent") this.notify(p.userId, "Vos gains sont arrivés", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/organisateur");
     if (r.status === "manual" && p.status !== "manual")
       for (const u of this.db.users.filter((x) => this.team.can(x, "team.manage"))) this.notify(u.id, "Reversement à faire", `${p.amount.toLocaleString("fr-FR")} FCFA à envoyer à un organisateur : ${r.error ?? ""}`, "/tobe");
     return next;
@@ -1243,13 +1394,18 @@ export class ToBeService {
   /** « Retirer maintenant » : la part disponible part tout de suite sur le Mobile Money de l'organisateur. */
   withdrawNow(userId: string) {
     const user = this.requireUser(userId);
-    const open = this.db.payouts.find((p) => p.userId === user.id && p.status === "queued");
-    if (!open || open.amount <= 0) throw new ApiError(400, "Aucun montant disponible pour l'instant");
-    if (open.amount < PRICING.withdrawMin) throw new ApiError(400, `Retrait possible à partir de ${PRICING.withdrawMin.toLocaleString("fr-FR")} FCFA`);
+    const ready = this.db.payouts.filter((p) => p.userId === user.id && p.status === "queued" && (p.kind ?? "organizer") === "organizer" && this.released(p));
+    const amount = ready.reduce((n, p) => n + p.amount, 0);
+    if (amount <= 0) {
+      const held = this.db.payouts.filter((p) => p.userId === user.id && p.status === "queued" && !this.released(p));
+      if (held.length) throw new ApiError(400, `Argent en séquestre jusqu'au ${new Date(held.map((p) => p.releaseAt!).sort()[0]).toLocaleDateString("fr-FR")} (24 h après l'événement). Il part ensuite automatiquement.`);
+      throw new ApiError(400, "Aucun montant disponible pour l'instant");
+    }
+    if (amount < PRICING.withdrawMin) throw new ApiError(400, `Retrait possible à partir de ${PRICING.withdrawMin.toLocaleString("fr-FR")} FCFA`);
     if (!user.payoutPhone || !user.payoutNetwork) throw new ApiError(400, "Indiquez d'abord votre numéro Mobile Money");
     if (!this.isVerifiedOrganizer(user.id)) throw new ApiError(403, "Retraits possibles dès que ToBe a vérifié votre identité");
     if (this.db.events.some((e) => e.organizerId === user.id && e.moderation === "suspended")) throw new ApiError(403, "Retraits suspendus : un de vos événements a été retiré par ToBe. Contactez l'équipe.");
-    this.db.payouts.update(open.id, { requested: true, updatedAt: this.iso() });
+    for (const p of ready) this.db.payouts.update(p.id, { requested: true, updatedAt: this.iso() });
     return this.myEarnings(user.id);
   }
 
@@ -1267,19 +1423,22 @@ export class ToBeService {
   /** Gains de l'organisateur : ce qui attend, ce qui est parti. */
   myEarnings(userId: string) {
     const user = this.requireUser(userId);
-    const list = this.db.payouts.filter((p) => p.userId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const list = this.db.payouts.filter((p) => p.userId === user.id && (p.kind ?? "organizer") === "organizer" && p.status !== "void").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const sum = (f: (p: Payout) => boolean) => list.filter(f).reduce((n, p) => n + p.amount, 0);
     return {
       phone: user.payoutPhone ?? null,
       network: user.payoutNetwork ?? null,
       pending: sum((p) => p.status !== "sent"),
-      available: sum((p) => p.status === "queued"),
+      available: sum((p) => p.status === "queued" && this.released(p)),
+      escrow: sum((p) => p.status === "queued" && !this.released(p)),
+      escrowUntil: list.filter((p) => p.status === "queued" && !this.released(p)).map((p) => p.releaseAt!).sort()[0] ?? null,
+      trusted: this.isTrusted(user.id),
       withdrawMin: PRICING.withdrawMin,
       canWithdraw: this.isVerifiedOrganizer(user.id) && !!user.payoutPhone && !!user.payoutNetwork,
       sent: sum((p) => p.status === "sent"),
       min: PRICING.payoutMin,
       commission: { ticket: PRICING.ticketCommission, vote: PRICING.voteCommission, cagnotte: PRICING.cagnotteCommission },
-      payouts: list.slice(0, 30).map((p) => ({ id: p.id, amount: p.amount, status: p.status, createdAt: p.createdAt, updatedAt: p.updatedAt, eventTitle: p.eventId ? (this.db.events.get(p.eventId)?.title ?? null) : null })),
+      payouts: list.slice(0, 30).map((p) => ({ id: p.id, amount: p.amount, status: p.status, releaseAt: p.releaseAt ?? null, createdAt: p.createdAt, updatedAt: p.updatedAt, eventTitle: p.eventId ? (this.db.events.get(p.eventId)?.title ?? null) : null })),
     };
   }
 
@@ -1290,7 +1449,7 @@ export class ToBeService {
     const paid = intents.filter((i) => i.status === "paid");
     const revenue = this.db.payments.filter((p) => !!p.intentId).reduce((n, p) => n + p.platformFee, 0);
     return {
-      totals: { collected: paid.reduce((n, i) => n + i.amount, 0), commission: revenue, toPay: this.db.payouts.filter((p) => p.status !== "sent").reduce((n, p) => n + p.amount, 0) },
+      totals: { collected: paid.reduce((n, i) => n + i.amount, 0), commission: revenue, toPay: this.db.payouts.filter((p) => p.status !== "sent" && p.status !== "void").reduce((n, p) => n + p.amount, 0) },
       intents: intents.slice(0, 40).map((i) => ({ id: i.id, description: i.description, amount: i.amount, status: i.status, error: i.error, createdAt: i.createdAt, user: this.db.users.get(i.userId)?.name ?? "?" })),
       payouts: this.db.payouts
         .all()
@@ -1298,7 +1457,7 @@ export class ToBeService {
         .slice(0, 60)
         .map((p) => {
           const u = this.db.users.get(p.userId);
-          return { ...p, organizer: u?.name ?? "?", phone: p.phone ?? u?.payoutPhone ?? null, network: p.network ?? u?.payoutNetwork ?? null };
+          return { ...p, organizer: u?.name ?? "?", trusted: this.isTrusted(p.userId), phone: p.phone ?? u?.payoutPhone ?? null, network: p.network ?? u?.payoutNetwork ?? null };
         }),
     };
   }
@@ -1310,7 +1469,8 @@ export class ToBeService {
     if (!p) throw new ApiError(404, "Reversement introuvable");
     if (action === "send") {
       if (p.status !== "queued") throw new ApiError(400, "Ce reversement est déjà en cours");
-      this.db.payouts.update(p.id, { requested: true, updatedAt: this.iso() });
+      // L'équipe peut libérer un séquestre en avance.
+      this.db.payouts.update(p.id, { requested: true, releaseAt: null, updatedAt: this.iso() });
     } else if (action === "done") this.recordPayout(p.id, { status: "sent", error: null });
     else this.db.payouts.update(p.id, { status: "failed", attempts: 0, error: null, updatedAt: new Date(0).toISOString() });
     return this.adminPayments(userId);
@@ -1319,7 +1479,7 @@ export class ToBeService {
   // =====================================================================
   // Billetterie
   // =====================================================================
-  buyTickets(userId: string, idOrSlug: string, input: { ticketTypeId: string; qty: number; method: PayMethod; code?: string | null }, settle?: PaymentIntent | null): Order {
+  buyTickets(userId: string, idOrSlug: string, input: { ticketTypeId: string; qty: number; method: PayMethod; code?: string | null; group?: string | null }, settle?: PaymentIntent | null): Order {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!settle && !this.canView(e, user, input.code)) throw new ApiError(403, "Accès réservé aux invités");
@@ -1327,16 +1487,25 @@ export class ToBeService {
     if (e.access === "none") throw new ApiError(400, "Pas de billetterie ToBe pour cet événement : voyez les infos d'entrée de l'organisateur");
     const tt = e.ticketTypes.find((t) => t.id === input.ticketTypeId);
     if (!tt) throw new ApiError(400, "Type de billet introuvable");
-    const qty = Math.round(input.qty);
+    // Cotisation : une place du groupe, déjà mise de côté.
+    const group = input.group ? this.db.groups.find((g) => g.code === String(input.group).toUpperCase()) : undefined;
+    if (input.group && !group) throw new ApiError(404, "Groupe introuvable");
+    if (group && !settle) {
+      if (group.eventId !== e.id || group.ticketTypeId !== tt.id) throw new ApiError(400, "Ce groupe est pour un autre billet");
+      if (group.members.some((m) => m.userId === user.id)) throw new ApiError(400, "Vous avez déjà payé votre place dans ce groupe");
+      if (group.members.length >= group.seats) throw new ApiError(400, "Toutes les places du groupe sont payées");
+      if (new Date(group.expiresAt) <= this.now()) throw new ApiError(400, "Ce groupe a expiré : les places non payées ont été libérées");
+    }
+    const qty = group ? 1 : Math.round(input.qty);
     if (qty < 1 || qty > 10) throw new ApiError(400, "Entre 1 et 10 billets par commande");
     // Places déjà en cours de paiement (moins de 30 minutes) : réservées pour leurs acheteurs.
     const holding = settle ? 0 : this.heldTickets(tt.id);
-    if (!settle && tt.quota && tt.sold + holding + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold - holding)} place(s) disponible(s)`);
+    if (!settle && !group && tt.quota && tt.sold + holding + qty > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold - holding)} place(s) disponible(s)`);
     const online = this.opts.paymentsEnabled && tt.price > 0;
     if (online && input.method === "cash" && !this.opts.checkout) throw new ApiError(400, "Choisissez un paiement Mobile Money ou carte");
     if (this.needsCheckout(tt.price * qty, settle)) {
       this.assertCanSell(e);
-      return this.openIntent(user.id, { kind: "ticket", eventId: e.id, ticketTypeId: tt.id, qty, code: input.code ?? null }, tt.price * qty, e.id, `${qty} billet${qty > 1 ? "s" : ""} ${tt.name} · ${e.title}`) as unknown as Order;
+      return this.openIntent(user.id, { kind: "ticket", eventId: e.id, ticketTypeId: tt.id, qty, code: input.code ?? null, group: group?.code ?? null }, tt.price * qty, e.id, `${qty} billet${qty > 1 ? "s" : ""} ${tt.name} · ${e.title}${group ? ` · groupe ${group.name}` : ""}`) as unknown as Order;
     }
     const organizer = this.db.users.get(e.organizerId);
     const fee = online ? ticketFee(tt.price, !!organizer?.pro) * qty : 0;
@@ -1354,6 +1523,7 @@ export class ToBeService {
       method: online ? input.method : "cash",
       status: online || tt.price === 0 ? "paid" : "reserved",
       code: randomCode(10),
+      secret: randomCode(24),
       scannedCount: 0,
       createdAt: this.iso(),
     };
@@ -1362,6 +1532,212 @@ export class ToBeService {
     if (online && total > 0) this.pay(user.id, "ticket", order.id, e.id, total, settle ? Math.round(total * PRICING.ticketCommission) : fee, input.method, settle, settle ? e.organizerId : null);
     // Billet pris : rappels automatiques 2 jours avant, la veille, le jour J et 30 minutes avant.
     this.reminders.add(e, { userId: user.id, subId: null }, "ticket");
+    if (group) {
+      const g = this.db.groups.update(group.id, (x) => ({ ...x, members: [...x.members, { userId: user.id, orderId: order.id, paidAt: this.iso() }] }));
+      if (g.members.length === g.seats) this.notify(g.ownerId, "Groupe complet", `Les ${g.seats} places de « ${g.name} » sont payées. Chacun a son billet.`, `/groupe/${g.code}`);
+      else if (g.ownerId !== user.id) this.notify(g.ownerId, "Une place payée", `${user.name || "Un membre"} a payé sa place (${g.members.length}/${g.seats}).`, `/groupe/${g.code}`);
+    }
+    return order;
+  }
+
+  // ---------- Observatoire des événements (page publique, chiffres agrégés seulement) ----------
+
+  observatory() {
+    const now = this.now();
+    const pub = this.db.events.filter((e) => e.visibility === "public" && !e.moderation);
+    const yearAgo = now.getTime() - 365 * 86400_000;
+    const recent = pub.filter((e) => new Date(e.startsAt).getTime() >= yearAgo);
+    const sold = (e: TobeEvent) => e.ticketTypes.reduce((n, t) => n + t.sold, 0);
+    const count = <K extends string>(list: TobeEvent[], key: (e: TobeEvent) => K) => {
+      const m = new Map<K, number>();
+      for (const e of list) m.set(key(e), (m.get(key(e)) ?? 0) + 1);
+      return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const months: { month: string; events: number; tickets: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const key = d.toISOString().slice(0, 7);
+      const list = pub.filter((e) => e.startsAt.slice(0, 7) === key);
+      months.push({ month: key, events: list.length, tickets: list.reduce((n, e) => n + sold(e), 0) });
+    }
+    const paidTickets = recent.filter((e) => e.access === "paid").flatMap((e) => e.ticketTypes.filter((t) => t.price > 0));
+    const avgPrice = paidTickets.length ? Math.round(paidTickets.reduce((n, t) => n + t.price, 0) / paidTickets.length) : 0;
+    const organizers = new Set(recent.map((e) => e.organizerId));
+    const toOrganizers = this.db.payouts.filter((p) => (p.kind ?? "organizer") === "organizer" && p.status === "sent").reduce((n, p) => n + p.amount, 0);
+    const weekday = [0, 0, 0, 0, 0, 0, 0];
+    for (const e of recent) weekday[new Date(e.startsAt).getUTCDay()]++;
+    return {
+      generatedAt: this.iso(),
+      totals: {
+        events: recent.length,
+        upcoming: pub.filter((e) => this.isUpcoming(e) && !e.cancelledAt).length,
+        tickets: recent.reduce((n, e) => n + sold(e), 0),
+        organizers: organizers.size,
+        verifiedOrganizers: [...organizers].filter((id) => this.isVerifiedOrganizer(id)).length,
+        verifiedEvents: recent.filter((e) => this.isEventVerified(e)).length,
+        cancelled: recent.filter((e) => !!e.cancelledAt).length,
+        freeShare: recent.length ? Math.round((recent.filter((e) => e.access !== "paid").length / recent.length) * 100) : 0,
+        avgPrice,
+        paidToOrganizers: toOrganizers,
+        photos: this.db.photos.filter((p) => recent.some((e) => e.id === p.eventId)).length,
+      },
+      byCategory: count(recent, (e) => e.category).map(([category, events]) => ({ category, label: CATEGORY_LABELS[category] ?? category, events })),
+      byCity: count(recent, (e) => (e.city || "Lomé").trim()).slice(0, 8).map(([city, events]) => ({ city, events })),
+      byWeekday: ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"].map((day, i) => ({ day, events: weekday[i] })),
+      months,
+    };
+  }
+
+  // ---------- Cotisation : payer à plusieurs ----------
+
+  private groupHeld(g: TicketGroup) {
+    return new Date(g.expiresAt) > this.now() ? Math.max(0, g.seats - g.members.length) : 0;
+  }
+
+  /** Un groupe met N places de côté (24 h au plus) ; chacun paie la sienne depuis le lien partagé. */
+  createGroup(userId: string, idOrSlug: string, input: { ticketTypeId: string; seats: number; name?: string }) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    if (!this.isUpcoming(e) || e.cancelledAt) throw new ApiError(400, "Cet événement n'est plus en vente");
+    if (e.access === "none") throw new ApiError(400, "Pas de billetterie ToBe pour cet événement");
+    const tt = e.ticketTypes.find((t) => t.id === input.ticketTypeId);
+    if (!tt) throw new ApiError(400, "Type de billet introuvable");
+    if (tt.price <= 0) throw new ApiError(400, "Billet gratuit : chacun peut prendre le sien directement");
+    const seats = Math.round(Number(input.seats));
+    if (!(seats >= 2 && seats <= 10)) throw new ApiError(400, "Un groupe compte de 2 à 10 places");
+    this.assertCanSell(e);
+    const held = this.heldTickets(tt.id);
+    if (tt.quota && tt.sold + held + seats > tt.quota) throw new ApiError(400, `Plus que ${Math.max(0, tt.quota - tt.sold - held)} place(s) disponible(s)`);
+    const expires = Math.min(this.now().getTime() + 24 * 3600_000, new Date(e.startsAt).getTime());
+    const g = this.db.groups.insert({
+      id: newId("grp"),
+      code: randomCode(6),
+      eventId: e.id,
+      ticketTypeId: tt.id,
+      ownerId: user.id,
+      name: String(input.name ?? "").trim().slice(0, 40) || `Groupe de ${user.name || "amis"}`,
+      seats,
+      unitPrice: tt.price,
+      members: [],
+      expiresAt: new Date(expires).toISOString(),
+      createdAt: this.iso(),
+    });
+    return this.groupView(g.code, user.id);
+  }
+
+  groupView(code: string, userId: string | null) {
+    const g = this.db.groups.find((x) => x.code === String(code).toUpperCase());
+    if (!g) throw new ApiError(404, "Groupe introuvable");
+    const e = this.db.events.get(g.eventId);
+    const tt = e?.ticketTypes.find((t) => t.id === g.ticketTypeId);
+    const owner = this.db.users.get(g.ownerId);
+    return {
+      code: g.code,
+      name: g.name,
+      event: e ? this.toCard(e) : null,
+      ticketTypeId: g.ticketTypeId,
+      ticketTypeName: tt?.name ?? "Billet",
+      unitPrice: g.unitPrice,
+      seats: g.seats,
+      paid: g.members.length,
+      members: g.members.map((m) => this.db.users.get(m.userId)?.name?.split(" ")[0] || "Membre"),
+      owner: owner?.name || "Organisateur du groupe",
+      expiresAt: g.expiresAt,
+      expired: new Date(g.expiresAt) <= this.now(),
+      full: g.members.length >= g.seats,
+      mine: !!userId && g.members.some((m) => m.userId === userId),
+      isOwner: userId === g.ownerId,
+    };
+  }
+
+  // ---------- Revente officielle à prix plafonné ----------
+
+  /** Remettre son billet en vente : au prix payé au maximum, avant le premier scan. */
+  listResale(userId: string, orderId: string, input: { phone: string; network: PayoutNetwork; price?: number }) {
+    const user = this.requireUser(userId);
+    const o = this.db.orders.get(orderId);
+    if (!o || o.userId !== user.id) throw new ApiError(404, "Billet introuvable");
+    if (o.status !== "paid" || o.unitPrice <= 0) throw new ApiError(400, "Seuls les billets payés peuvent être revendus");
+    if (o.scannedCount > 0) throw new ApiError(400, "Billet déjà utilisé à l'entrée");
+    const e = this.db.events.get(o.eventId);
+    if (!e || !this.isUpcoming(e) || e.cancelledAt) throw new ApiError(400, "Cet événement n'est plus en vente");
+    if (this.db.resales.some((r) => r.orderId === o.id && r.status === "listed")) throw new ApiError(400, "Ce billet est déjà en revente");
+    const cap = o.unitPrice * o.qty;
+    const price = input.price ? Math.round(Number(input.price)) : cap;
+    if (!(price >= 100 && price <= cap)) throw new ApiError(400, `Prix de revente entre 100 et ${cap.toLocaleString("fr-FR")} FCFA (jamais plus cher que le prix officiel)`);
+    const local = this.localPhone(input.phone);
+    if (!/^[79]\d{7}$/.test(local)) throw new ApiError(400, "Numéro Mobile Money togolais invalide (8 chiffres, ex. 90 12 34 56)");
+    if (!["moov", "togocel", "mixx"].includes(input.network)) throw new ApiError(400, "Réseau inconnu");
+    this.db.resales.insert({ id: newId("rsl"), orderId: o.id, sellerId: user.id, eventId: e.id, ticketTypeName: o.ticketTypeName, qty: o.qty, price, phone: local, network: input.network, status: "listed", buyerId: null, newOrderId: null, createdAt: this.iso(), soldAt: null });
+    return this.myTickets(user.id);
+  }
+
+  cancelResale(userId: string, resaleId: string) {
+    const user = this.requireUser(userId);
+    const r = this.db.resales.get(resaleId);
+    if (!r || r.sellerId !== user.id) throw new ApiError(404, "Revente introuvable");
+    if (r.status !== "listed") throw new ApiError(400, "Ce billet est déjà vendu");
+    if (this.resaleLocked(r.id)) throw new ApiError(400, "Un acheteur est en train de payer : réessayez dans 30 minutes");
+    this.db.resales.update(r.id, { status: "cancelled" });
+    return this.myTickets(user.id);
+  }
+
+  private resaleLocked(resaleId: string) {
+    const since = this.now().getTime() - 30 * 60_000;
+    return this.db.intents.some((i) => i.action.kind === "resale" && i.action.resaleId === resaleId && (i.status === "created" || i.status === "pending") && new Date(i.createdAt).getTime() > since);
+  }
+
+  /** Billets en revente pour un événement (prix officiel au plus). */
+  eventResales(idOrSlug: string, userId: string | null) {
+    const eventId = this.findEvent(idOrSlug).id;
+    return this.db.resales
+      .filter((r) => r.eventId === eventId && r.status === "listed" && !this.resaleLocked(r.id))
+      .sort((a, b) => a.price - b.price)
+      .map((r) => ({ id: r.id, ticketTypeName: r.ticketTypeName, qty: r.qty, price: r.price, mine: r.sellerId === userId }));
+  }
+
+  /** Acheter un billet revendu : l'ancien QR est invalidé, l'acheteur reçoit un billet neuf, le vendeur est payé. */
+  buyResale(userId: string, resaleId: string, input: { method: PayMethod }, settle?: PaymentIntent | null): Order {
+    const user = this.requireUser(userId);
+    const r = this.db.resales.get(resaleId);
+    if (!r) throw new ApiError(404, "Billet introuvable");
+    if (r.status !== "listed") throw new ApiError(400, "Ce billet vient d'être vendu");
+    if (!settle && r.sellerId === user.id) throw new ApiError(400, "C'est votre propre billet");
+    const e = this.db.events.get(r.eventId);
+    if (!e || e.cancelledAt || (!settle && !this.isUpcoming(e))) throw new ApiError(400, "Cet événement n'est plus en vente");
+    const old = this.db.orders.get(r.orderId);
+    if (!old || old.status !== "paid" || old.scannedCount > 0) {
+      this.db.resales.update(r.id, { status: "cancelled" });
+      throw new ApiError(400, "Ce billet n'est plus disponible");
+    }
+    if (this.needsCheckout(r.price, settle)) {
+      if (this.resaleLocked(r.id)) throw new ApiError(400, "Quelqu'un est en train d'acheter ce billet. Réessayez dans quelques minutes.");
+      return this.openIntent(user.id, { kind: "resale", resaleId: r.id }, r.price, e.id, `Revente · ${r.qty} × ${r.ticketTypeName} · ${e.title}`) as unknown as Order;
+    }
+    this.db.orders.update(old.id, { status: "resold" });
+    const order = this.db.orders.insert({
+      id: newId("ord"),
+      eventId: e.id,
+      userId: user.id,
+      ticketTypeId: old.ticketTypeId,
+      ticketTypeName: old.ticketTypeName,
+      qty: old.qty,
+      unitPrice: Math.round(r.price / old.qty),
+      fee: 0,
+      total: r.price,
+      method: "online",
+      status: "paid",
+      code: randomCode(10),
+      secret: randomCode(24),
+      scannedCount: 0,
+      createdAt: this.iso(),
+    });
+    this.db.resales.update(r.id, { status: "sold", buyerId: user.id, newOrderId: order.id, soldAt: this.iso() });
+    const fee = Math.round(r.price * PRICING.resaleCommission);
+    this.recordPayment({ userId: user.id, kind: "ticket", refId: order.id, eventId: e.id, amount: r.price, platformFee: fee, method: "online", intentId: settle?.id ?? null, organizerShare: 0, organizerId: null });
+    if (settle) this.db.payouts.insert({ id: newId("rvt"), userId: r.sellerId, eventId: e.id, intentIds: [settle.id], amount: r.price - fee, phone: r.phone, network: r.network, status: "queued", kind: "resale", orderId: old.id, gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
+    this.notify(r.sellerId, "Votre billet est revendu", `${(r.price - fee).toLocaleString("fr-FR")} FCFA partent sur votre Mobile Money ${r.phone}. L'ancien QR n'est plus valable.`, "/billets");
+    this.reminders.add(e, { userId: user.id, subId: null }, "ticket");
     return order;
   }
 
@@ -1369,9 +1745,12 @@ export class ToBeService {
     const user = this.requireUser(userId);
     return this.db.orders
       .filter((o) => o.userId === user.id && (o.status === "paid" || o.status === "reserved"))
+      // Anciens billets : on leur donne un secret de QR dynamique.
+      .map((o) => (o.secret ? o : this.db.orders.update(o.id, { secret: randomCode(24) })))
       .map((o) => {
         const e = this.db.events.get(o.eventId);
-        return { ...o, event: e ? this.toCard(e) : null };
+        const rs = this.db.resales.find((r) => r.orderId === o.id && r.status === "listed");
+        return { ...o, event: e ? this.toCard(e) : null, resale: rs ? { id: rs.id, price: rs.price } : null };
       })
       .sort((a, b) => (a.event?.startsAt ?? "").localeCompare(b.event?.startsAt ?? ""));
   }
@@ -1381,21 +1760,77 @@ export class ToBeService {
     const o = this.db.orders.get(orderId);
     if (!o || (o.userId !== user.id && user.role !== "admin")) throw new ApiError(404, "Billet introuvable");
     const e = this.db.events.get(o.eventId);
-    return { ...o, event: e ? this.toCard(e) : null, holder: user.name || user.email };
+    const rs = this.db.resales.find((r) => r.orderId === o.id && r.status === "listed");
+    return { ...o, event: e ? this.toCard(e) : null, holder: user.name || user.email, resale: rs ? { id: rs.id, price: rs.price } : null };
   }
 
   scanTicket(userId: string, rawCode: string, eventId?: string) {
     const user = this.requireUser(userId);
-    const code = rawCode.trim().toUpperCase().replace(/^TOBE:/, "");
+    const parsed = parseQr(rawCode);
+    const code = parsed.code;
     const o = this.db.orders.find((x) => x.code === code);
     if (!o) return { ok: false as const, reason: "Billet inconnu" };
     const e = this.db.events.get(o.eventId);
     if (!e || !this.team.access(e, user).scan) return { ok: false as const, reason: "Ce billet n'est pas pour vos événements" };
     if (eventId && e.id !== eventId) return { ok: false as const, reason: `Billet pour un autre événement : ${e.title}` };
+    if (o.status !== "paid" && o.status !== "reserved") return { ok: false as const, reason: o.status === ("resold" as string) ? "Billet revendu : l'ancien QR n'est plus valable" : "Billet non valable" };
+    // QR dynamique : signature et fraîcheur (une capture d'écran expire en une minute).
+    let warning: string | null = null;
+    if (parsed.kind === "dynamic") {
+      const check = o.secret ? checkDynamicQr(parsed, o.secret, this.now().getTime()) : "forged";
+      if (check === "forged") return { ok: false as const, reason: "Faux QR code" };
+      if (check === "expired") return { ok: false as const, reason: "QR expiré : c'est une capture d'écran. Demandez le téléphone du détenteur." };
+    } else if (o.secret) {
+      warning = "Code saisi à la main : vérifiez la pièce d'identité du détenteur";
+    }
     if (o.scannedCount >= o.qty) return { ok: false as const, reason: "Billet déjà utilisé", order: o };
     const next = this.db.orders.update(o.id, { scannedCount: o.scannedCount + 1 });
     const holder = this.db.users.get(o.userId);
-    return { ok: true as const, order: next, holder: holder?.name || holder?.email || "", amountDue: next.status === "reserved" ? next.total : 0, remaining: next.qty - next.scannedCount, eventTitle: e.title };
+    return { ok: true as const, order: { ...next, secret: undefined }, holder: holder?.name || holder?.email || "", amountDue: next.status === "reserved" ? next.total : 0, remaining: next.qty - next.scannedCount, eventTitle: e.title, warning };
+  }
+
+  /**
+   * Scanner hors connexion : liste des billets de l'événement à garder sur le téléphone du contrôleur.
+   * Réservé aux personnes qui ont le droit de scanner cet événement.
+   */
+  scanManifest(userId: string, eventId: string) {
+    const user = this.requireUser(userId);
+    const e = this.db.events.get(eventId);
+    if (!e) throw new ApiError(404, "Événement introuvable");
+    if (!this.team.access(e, user).scan) throw new ApiError(403, "Vous ne pouvez pas scanner cet événement");
+    const tickets = this.db.orders
+      .filter((o) => o.eventId === e.id && (o.status === "paid" || o.status === "reserved"))
+      .map((o) => {
+        const secret = o.secret ?? this.db.orders.update(o.id, { secret: randomCode(24) }).secret!;
+        const holder = this.db.users.get(o.userId);
+        return { code: o.code, secret, qty: o.qty, scannedCount: o.scannedCount, amountDue: o.status === "reserved" ? o.total : 0, ticketTypeName: o.ticketTypeName, holder: holder?.name || holder?.email || "" };
+      });
+    return { eventId: e.id, eventTitle: e.title, generatedAt: this.iso(), tickets };
+  }
+
+  /** Envoie les entrées validées hors connexion. Les doublons (même billet passé deux fois) sont signalés. */
+  scanSync(userId: string, eventId: string, scans: { code: string; at?: string }[]) {
+    const user = this.requireUser(userId);
+    const e = this.db.events.get(eventId);
+    if (!e) throw new ApiError(404, "Événement introuvable");
+    if (!this.team.access(e, user).scan) throw new ApiError(403, "Vous ne pouvez pas scanner cet événement");
+    let accepted = 0;
+    const conflicts: { code: string; reason: string }[] = [];
+    for (const sc of (Array.isArray(scans) ? scans : []).slice(0, 5000)) {
+      const code = String(sc?.code ?? "").toUpperCase();
+      const o = this.db.orders.find((x) => x.code === code && x.eventId === e.id);
+      if (!o || (o.status !== "paid" && o.status !== "reserved")) {
+        conflicts.push({ code, reason: "Billet non valable" });
+        continue;
+      }
+      if (o.scannedCount >= o.qty) {
+        conflicts.push({ code, reason: "Déjà utilisé (passé deux fois, peut-être à une autre porte)" });
+        continue;
+      }
+      this.db.orders.update(o.id, { scannedCount: o.scannedCount + 1 });
+      accepted++;
+    }
+    return { accepted, conflicts };
   }
 
   // =====================================================================
@@ -1643,15 +2078,16 @@ export class ToBeService {
    * Inscription du visage. L'application envoie plusieurs captures (face, gauche, droite) :
    * on vérifie qu'elles montrent bien la même personne, puis on garde toutes les empreintes.
    */
-  setFace(userId: string, input: number[] | number[][]) {
+  setFace(userId: string, input: number[] | number[][], consent?: unknown) {
     const user = this.requireUser(userId);
+    if (consent !== true && consent !== FACE_CONSENT_VERSION) throw new ApiError(400, "Cochez la case d'accord pour activer la reconnaissance de votre visage");
     const samples = (Array.isArray(input?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
     if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
     for (let i = 0; i < samples.length; i++)
       for (let j = i + 1; j < samples.length; j++)
         if (faceDistance(samples[i], samples[j]) > FACE_CONSISTENCY_MAX)
           throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez, seul face à la caméra.");
-    const u = this.db.users.update(user.id, { faceDescriptor: meanDescriptor(samples), faceDescriptors: samples, passEnabled: true, neverShow: false });
+    const u = this.db.users.update(user.id, { faceDescriptor: meanDescriptor(samples), faceDescriptors: samples, passEnabled: true, neverShow: false, faceConsentAt: this.iso(), faceConsentVersion: FACE_CONSENT_VERSION, faceUsedAt: this.iso() });
     return { user: this.publicUser(u), groups: this.myPhotos(u.id) };
   }
 
@@ -1663,13 +2099,41 @@ export class ToBeService {
 
   clearFace(userId: string) {
     const user = this.requireUser(userId);
-    return this.publicUser(this.db.users.update(user.id, { faceDescriptor: null, faceDescriptors: null, passEnabled: false }));
+    return this.publicUser(this.db.users.update(user.id, { faceDescriptor: null, faceDescriptors: null, passEnabled: false, faceConsentAt: null, faceUsedAt: null }));
+  }
+
+  /**
+   * Durées de conservation (loi togolaise n° 2019-014 sur les données personnelles) :
+   * - empreinte du visage d'un compte : effacée après 12 mois sans utilisation ;
+   * - empreintes calculées sur les photos d'un événement : effacées 6 mois après l'événement
+   *   (les photos restent visibles, la recherche par visage s'arrête).
+   */
+  purgeFaceData() {
+    const now = this.now().getTime();
+    let accounts = 0;
+    let photos = 0;
+    for (const u of this.db.users.filter((x) => !!x.faceDescriptor || !!x.faceDescriptors?.length)) {
+      const last = new Date(u.faceUsedAt ?? u.faceConsentAt ?? u.createdAt).getTime();
+      if (now - last > FACE_ACCOUNT_RETENTION_MS) {
+        this.db.users.update(u.id, { faceDescriptor: null, faceDescriptors: null, passEnabled: false, faceUsedAt: null });
+        this.notify(u.id, "Empreinte du visage effacée", "Vous n'avez pas utilisé le Pass ToBe depuis 12 mois : nous avons effacé l'empreinte de votre visage. Réactivez-le quand vous voulez.", "/photos");
+        accounts++;
+      }
+    }
+    const old = new Set(this.db.events.filter((e) => now - new Date(e.endsAt ?? e.startsAt).getTime() > FACE_PHOTO_RETENTION_MS).map((e) => e.id));
+    for (const p of this.db.photos.filter((x) => old.has(x.eventId) && x.faces.length > 0)) {
+      this.db.photos.update(p.id, { faces: [] });
+      photos++;
+    }
+    return { accounts, photos };
   }
 
   myPhotos(userId: string) {
     const user = this.requireUser(userId);
     const mine = userFaces(user);
     if (!mine.length) return [];
+    // Empreinte utilisée : le compteur des 12 mois repart (une fois par jour au plus).
+    if (!user.faceUsedAt || this.now().getTime() - new Date(user.faceUsedAt).getTime() > 86400_000) this.db.users.update(user.id, { faceUsedAt: this.iso() });
     return this.matchPhotos(mine, user);
   }
 

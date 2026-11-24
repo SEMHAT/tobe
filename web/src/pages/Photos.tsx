@@ -35,7 +35,7 @@ export function Photos() {
       setTimeout(() => setScan(null), 700);
       return;
     }
-    const r = await api<{ groups: PhotoGroup[] }>("POST", "/me/face", { descriptors });
+    const r = await api<{ groups: PhotoGroup[] }>("POST", "/me/face", { descriptors, consent: true });
     setData(r.groups);
     await refresh();
     setTimeout(() => setScan(null), 900);
@@ -537,7 +537,12 @@ export function CameraSheet({ open, onClose, onDescriptors, title, mode }: { ope
           <p className="text-sm leading-relaxed text-muted">L'analyse se fait sur ce téléphone. Seule une empreinte (une suite de nombres) est envoyée, jamais la photo. Vous pouvez la supprimer à tout moment.</p>
           <label className="flex items-start gap-3 rounded-2xl border border-line bg-card p-4 text-sm">
             <input type="checkbox" className="mt-0.5 size-5 accent-[#1800ad]" checked={agree} onChange={(e) => setAgree(e.target.checked)} />
-            <span>J'accepte que ToBe utilise l'empreinte de mon visage pour retrouver les photos où j'apparais.</span>
+            <span>
+              J'accepte que ToBe utilise l'empreinte de mon visage pour retrouver les photos où j'apparais.{" "}
+              <a href="/confidentialite" target="_blank" className="font-semibold text-brand underline">
+                Durées et droits
+              </a>
+            </span>
           </label>
           <Button full size="lg" disabled={!agree} onClick={start} icon={<Camera className="size-5" />}>
             Ouvrir la caméra

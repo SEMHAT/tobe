@@ -107,7 +107,7 @@ test("Pass ToBe : photos retrouvées et notification", () => {
   const fan = login("fan@exemple.tg", "Fan").user;
   const me = Array.from({ length: 128 }, (_, i) => Math.sin(i) / 10);
   const other = Array.from({ length: 128 }, (_, i) => Math.cos(i) / 10);
-  svc.setFace(fan.id, me);
+  svc.setFace(fan.id, me, true);
   const r = svc.addPhotos(org.id, "evt_afronight", [
     { url: "/a.jpg", width: 10, height: 10, faces: [me.map((x) => x + 0.01), other] },
     { url: "/b.jpg", width: 10, height: 10, faces: [other] },

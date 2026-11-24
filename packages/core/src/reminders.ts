@@ -185,6 +185,11 @@ export class Reminders {
     for (const r of this.db.reminders.filter((r) => r.eventId === e.id)) this.db.reminders.update(r.id, { sent: due });
   }
 
+  /** Événement annulé : plus aucun rappel. */
+  cancel(eventId: string) {
+    for (const r of this.db.reminders.filter((r) => r.eventId === eventId)) this.db.reminders.remove(r.id);
+  }
+
   /** Les moments où partiront les rappels (affichés à l'utilisateur). */
   schedule(e: TobeEvent) {
     const start = new Date(e.startsAt);

@@ -34,6 +34,11 @@ export interface User {
   faceDescriptor: number[] | null;
   /** Plusieurs empreintes du même visage (face, profil gauche, profil droit) : reconnaissance plus fiable. */
   faceDescriptors?: number[][] | null;
+  /** Consentement explicite à l'empreinte du visage (date et version du texte accepté). */
+  faceConsentAt?: string | null;
+  faceConsentVersion?: string | null;
+  /** Dernière utilisation de l'empreinte : supprimée après 12 mois sans usage. */
+  faceUsedAt?: string | null;
   neverShow: boolean;
   avatar?: string | null;
   googleId?: string | null;
@@ -44,6 +49,8 @@ export interface User {
   payoutNetwork?: PayoutNetwork | null;
   /** Vérification d'organisateur par l'équipe ToBe : requise pour vendre en ligne et recevoir de l'argent. */
   verification?: OrganizerVerification | null;
+  /** Organisateur de confiance (décidé par ToBe) : ses ventes de billets ne passent pas par le séquestre. */
+  trusted?: boolean;
 }
 
 export interface OrganizerVerification {
@@ -87,11 +94,46 @@ export type PayoutNetwork = "moov" | "togocel" | "mixx";
 
 /** Ce qu'un paiement en ligne doit déclencher une fois confirmé. */
 export type IntentAction =
-  | { kind: "ticket"; eventId: string; ticketTypeId: string; qty: number; code?: string | null }
+  | { kind: "ticket"; eventId: string; ticketTypeId: string; qty: number; code?: string | null; group?: string | null }
+  | { kind: "resale"; resaleId: string }
   | { kind: "vote"; contestId: string; candidateId: string; pack: string }
   | { kind: "contribution"; cagnotteId: string; amount: number; message?: string; anonymous?: boolean; name?: string; code?: string | null }
   | { kind: "boost"; eventId: string; plan: string }
   | { kind: "subscription"; plan: "premium" | "pro" };
+
+/** Cotisation : un groupe réserve N places, chacun paie la sienne et reçoit son propre billet. */
+export interface TicketGroup {
+  id: string;
+  /** Code court partagé sur WhatsApp. */
+  code: string;
+  eventId: string;
+  ticketTypeId: string;
+  ownerId: string;
+  name: string;
+  seats: number;
+  unitPrice: number;
+  members: { userId: string; orderId: string; paidAt: string }[];
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** Revente officielle : un billet remis en vente au prix d'achat maximum. */
+export interface Resale {
+  id: string;
+  orderId: string;
+  sellerId: string;
+  eventId: string;
+  ticketTypeName: string;
+  qty: number;
+  price: number;
+  phone: string;
+  network: PayoutNetwork;
+  status: "listed" | "sold" | "cancelled";
+  buyerId: string | null;
+  newOrderId: string | null;
+  createdAt: string;
+  soldAt: string | null;
+}
 
 /** Paiement en ligne en cours (page de paiement SasPay). */
 export interface PaymentIntent {
@@ -125,7 +167,13 @@ export interface Payout {
   phone: string | null;
   network: PayoutNetwork | null;
   /** queued : en attente · sending : envoyé à SasPay · sent : reçu · failed : échec (sera retenté) · manual : à faire depuis le tableau de bord SasPay */
-  status: "queued" | "sending" | "sent" | "failed" | "manual";
+  status: "queued" | "sending" | "sent" | "failed" | "manual" | "void";
+  /** organizer : gains de l'organisateur · refund : remboursement d'un acheteur · resale : vendeur d'un billet revendu. */
+  kind?: "organizer" | "refund" | "resale";
+  /** Séquestre : l'argent ne part pas avant cette date (fin de l'événement + 24 h). */
+  releaseAt?: string | null;
+  /** Remboursement : billet concerné. */
+  orderId?: string | null;
   gatewayId: string | null;
   /** Retrait demandé (organisateur ou équipe) : part tout de suite, même sous le seuil automatique. */
   requested?: boolean;
@@ -171,6 +219,9 @@ export interface TobeEvent {
   /** review : en vérification (doublon possible, signalements) · suspended : retiré par ToBe. Masqué et ventes fermées. */
   moderation?: "review" | "suspended" | null;
   moderationReason?: string | null;
+  /** Événement annulé : billets invalidés, acheteurs remboursés sur leur Mobile Money. */
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
   /** Événement vérifié par ToBe (preuves contrôlées) : badge public et ventes ouvertes. */
   approvedAt?: string | null;
   /** Preuves que l'organisateur organise bien cet événement (fichiers privés). */
@@ -224,8 +275,10 @@ export interface Order {
   total: number;
   method: PayMethod;
   /** paid : payé en ligne · reserved : place réservée, à régler à l'entrée */
-  status: "paid" | "reserved" | "pending" | "failed";
+  status: "paid" | "reserved" | "pending" | "failed" | "cancelled" | "resold";
   code: string;
+  /** Secret du QR dynamique : connu du détenteur et des scanners de l'événement seulement. */
+  secret?: string;
   scannedCount: number;
   createdAt: string;
 }

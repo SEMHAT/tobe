@@ -39,7 +39,7 @@ function setup() {
   };
   const call = (method: string, path: string, token: string | null, body?: unknown) =>
     runWithPayments(async (q) => handleApi(svc, { method: q.method, path: q.path, body: q.body, token: q.token ?? null, verified: { internal: q.verified?.internal === true } }), { gateway: gw, publicUrl: "https://tobe.test" }, { method, path, token, body });
-  const verify = (userId: string) => db.users.update(userId, { verification: { status: "verified", fullName: "Orga Test", phone: "90000000", orgName: "Orga", link: "", about: "", submittedAt: "", reviewedAt: "", reviewedBy: null, reason: null } });
+  const verify = (userId: string) => db.users.update(userId, { verification: { status: "verified", fullName: "Orga Test", phone: "90000000", orgName: "Orga", link: "", about: "", submittedAt: "", reviewedAt: "", reviewedBy: null, reason: null }, trusted: true });
   return { db, svc, login, call, paid, payouts, verify, failPayout: (e: GatewayError | null) => (payoutError = e) };
 }
 

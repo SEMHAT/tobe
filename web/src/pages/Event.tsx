@@ -1,5 +1,5 @@
 import type { EventView } from "@tobe/core";
-import {
+import { Ban,
   BadgeCheck,
   CalendarPlus,
   Camera,
@@ -34,6 +34,7 @@ import { Button, Card, ErrorState, IconButton, PageLoader, Progress, Sheet, TopB
 import { Avatar, Img, Poster, TierBadge } from "../components/visual";
 import { api } from "../lib/api";
 import { CATEGORY_LABELS, compact, countdown, formatFcfa, longDate, shareUrl, time, whatsappLink } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 import { usePageMeta } from "../lib/seo";
@@ -140,7 +141,7 @@ export function EventPage() {
           <InfoRow icon={<Users className="size-5" />} title={e.attendees ? `${compact(e.attendees)} participant${e.attendees > 1 ? "s" : ""}` : "Soyez parmi les premiers"} sub={`${compact(e.expectedAttendance)} attendus`} />
         </div>
 
-        {!ended && e.access !== "none" && <RemindCard e={e} />}
+        {!ended && !e.cancelReason && e.access !== "none" && <RemindCard e={e} />}
 
         {e.moderation && (
           <div className="mt-5 flex gap-2.5 rounded-2xl bg-[#fff4dc] p-3.5 text-sm text-[#7a4a00] dark:bg-[#3a2a08] dark:text-[#ffd98a]">
@@ -206,6 +207,15 @@ export function EventPage() {
       </div>
 
       <div className="px-5 pt-5 lg:px-0">
+        {e.cancelReason && (
+          <div className="mb-5 flex gap-3 rounded-2xl border border-coral/30 bg-coral/10 p-4 text-sm">
+            <Ban className="size-5 shrink-0 text-coral" />
+            <div>
+              <div className="font-semibold">Événement annulé</div>
+              <div className="text-muted">« {e.cancelReason} » · Les billets achetés en ligne sont remboursés automatiquement sur le Mobile Money des acheteurs.</div>
+            </div>
+          </div>
+        )}
         {tab === "infos" && (
           <div className="space-y-5">
             <p className="whitespace-pre-line text-[15px] leading-relaxed text-ink/85">{e.description || "L'organisateur n'a pas encore ajouté de description."}</p>
@@ -266,6 +276,13 @@ export function EventPage() {
 
 function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; ended: boolean }) {
   const nav = useNavigate();
+  const t = useT();
+  if (e.cancelReason)
+    return (
+      <Button full size="lg" variant="dark" icon={<Ticket className="size-5 text-brand" />} onClick={() => nav("/billets")}>
+        Événement annulé · voir mes remboursements
+      </Button>
+    );
   if (!ended && e.access === "paid" && e.salesBlocked && e.myTickets === 0)
     return (
       <div className="flex items-center gap-3 rounded-2xl bg-card-2 p-3 text-sm">
@@ -276,7 +293,7 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
   if (e.myTickets > 0)
     return (
       <Button full size="lg" variant="dark" icon={<Ticket className="size-5 text-brand" />} onClick={() => nav("/billets")}>
-        {e.myTickets > 1 ? `Mes ${e.myTickets} billets` : "Voir mon billet"}
+        {e.myTickets > 1 ? t("ev.myTickets", { n: e.myTickets }) : t("ev.myTicket")}
       </Button>
     );
   if (ended)
@@ -289,11 +306,11 @@ function BottomAction({ e, minPrice, ended }: { e: EventView; minPrice: number; 
   return (
     <div className="flex items-center gap-4">
       <div className="shrink-0">
-        <div className="text-xs text-muted">{e.access === "paid" ? "À partir de" : e.access === "invite" ? "Invitation" : "Entrée"}</div>
-        <div className="font-display text-lg font-bold">{e.access === "paid" ? formatFcfa(minPrice) : "Gratuite"}</div>
+        <div className="text-xs text-muted">{e.access === "paid" ? t("ev.from") : e.access === "invite" ? t("ev.invitation") : t("ev.entry")}</div>
+        <div className="font-display text-lg font-bold">{e.access === "paid" ? formatFcfa(minPrice) : t("ev.free")}</div>
       </div>
       <Button full size="lg" icon={<Ticket className="size-5" />} onClick={() => nav(`/evenement/${e.slug}/billets`)}>
-        {e.access === "paid" ? "Prendre mon billet" : e.access === "invite" ? "Confirmer ma présence" : "Réserver ma place"}
+        {e.access === "paid" ? t("ev.getTicket") : e.access === "invite" ? t("ev.confirm") : t("ev.reserve")}
       </Button>
     </div>
   );

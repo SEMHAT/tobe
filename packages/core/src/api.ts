@@ -53,7 +53,7 @@ export const routes: Route[] = [
   { method: "DELETE", path: "/me", handler: (s, c) => s.deleteAccount(need(c)) },
   { method: "GET", path: "/me/tickets", handler: (s, c) => s.myTickets(need(c)) },
   { method: "GET", path: "/me/photos", handler: (s, c) => s.myPhotos(need(c)) },
-  { method: "POST", path: "/me/face", handler: (s, c) => s.setFace(need(c), c.body?.descriptors ?? c.body?.descriptor) },
+  { method: "POST", path: "/me/face", handler: (s, c) => s.setFace(need(c), c.body?.descriptors ?? c.body?.descriptor, c.body?.consent) },
   { method: "DELETE", path: "/me/face", handler: (s, c) => s.clearFace(need(c)) },
   { method: "PATCH", path: "/me/pass", handler: (s, c) => s.setPass(need(c), c.body ?? {}) },
   { method: "GET", path: "/me/notifications", handler: (s, c) => s.notifications(need(c)) },
@@ -75,6 +75,20 @@ export const routes: Route[] = [
 
   // Billets
   { method: "GET", path: "/tickets/:id", handler: (s, c) => s.getTicket(need(c), c.params.id) },
+  { method: "GET", path: "/observatoire", handler: (s) => s.observatory() },
+  { method: "POST", path: "/events/:id/groups", handler: (s, c) => s.createGroup(need(c), c.params.id, c.body) },
+  { method: "GET", path: "/groups/:code", handler: (s, c) => s.groupView(c.params.code, c.userId) },
+  { method: "POST", path: "/groups/:code/pay", handler: (s, c) => { const g = s.groupView(c.params.code, c.userId); return s.buyTickets(need(c), g.event?.id ?? "", { ticketTypeId: g.ticketTypeId, qty: 1, method: c.body?.method ?? "online", group: g.code }); } },
+  { method: "POST", path: "/tickets/:id/resale", handler: (s, c) => s.listResale(need(c), c.params.id, c.body) },
+  { method: "POST", path: "/resales/:id/cancel", handler: (s, c) => s.cancelResale(need(c), c.params.id) },
+  { method: "GET", path: "/events/:id/resales", handler: (s, c) => s.eventResales(c.params.id, c.userId) },
+  { method: "POST", path: "/resales/:id/buy", handler: (s, c) => s.buyResale(need(c), c.params.id, { method: c.body?.method ?? "online" }) },
+  { method: "POST", path: "/events/:id/cancel", handler: (s, c) => s.cancelEvent(need(c), c.params.id, String(c.body?.reason ?? "")) },
+  { method: "GET", path: "/me/refunds", handler: (s, c) => s.myRefunds(need(c)) },
+  { method: "POST", path: "/me/refunds/:id/account", handler: (s, c) => s.setRefundAccount(need(c), c.params.id, c.body) },
+  { method: "POST", path: "/admin/users/:id/trusted", handler: (s, c) => s.setTrusted(need(c), c.params.id, !!c.body?.trusted) },
+  { method: "GET", path: "/events/:id/scan-manifest", handler: (s, c) => s.scanManifest(need(c), c.params.id) },
+  { method: "POST", path: "/events/:id/scan-sync", handler: (s, c) => s.scanSync(need(c), c.params.id, c.body?.scans) },
   { method: "POST", path: "/tickets/scan", handler: (s, c) => s.scanTicket(need(c), String(c.body?.code ?? ""), c.body?.eventId) },
 
   // Votes
@@ -141,6 +155,7 @@ export const routes: Route[] = [
   { method: "POST", path: "/admin/payouts/:id/send", handler: (s, c) => s.adminPayoutAction(need(c), c.params.id, "send") },
   { method: "POST", path: "/admin/payouts/:id/retry", handler: (s, c) => s.adminPayoutAction(need(c), c.params.id, "retry") },
   { method: "POST", path: "/cron/payments", handler: () => ({ ok: true }) },
+  { method: "GET", path: "/cron/payments", handler: () => ({ ok: true }) },
   { method: "POST", path: "/saspay/webhook", handler: () => ({ ok: true }) },
   // Réservé à la couche paiement du serveur (appels à SasPay hors transaction).
   { method: "GET", path: "/internal/intents/pending", handler: (s, c) => (internal(c), s.pendingIntents()) },
@@ -160,8 +175,8 @@ export const routes: Route[] = [
   { method: "GET", path: "/admin/moderation", handler: (s, c) => s.moderationQueue(need(c)) },
   { method: "POST", path: "/admin/verifications/:id", handler: (s, c) => s.reviewVerification(need(c), c.params.id, c.body as never) },
   { method: "POST", path: "/admin/events/:id/moderation", handler: (s, c) => s.moderateEvent(need(c), c.params.id, c.body as never) },
-  { method: "GET", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
-  { method: "POST", path: "/cron/reminders", handler: (s) => s.reminders.processDue() },
+  { method: "GET", path: "/cron/reminders", handler: (s) => ({ ...s.reminders.processDue(), privacy: s.purgeFaceData() }) },
+  { method: "POST", path: "/cron/reminders", handler: (s) => ({ ...s.reminders.processDue(), privacy: s.purgeFaceData() }) },
 
   // Équipe ToBe
   { method: "GET", path: "/team", handler: (s, c) => s.team.teamView(need(c)) },

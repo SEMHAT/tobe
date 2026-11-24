@@ -513,10 +513,11 @@ function ErrorsAdmin() {
 interface PaymentsData {
   totals: { collected: number; commission: number; toPay: number };
   intents: { id: string; description: string; amount: number; status: string; error: string | null; createdAt: string; user: string }[];
-  payouts: { id: string; organizer: string; amount: number; status: "queued" | "sending" | "sent" | "failed" | "manual"; phone: string | null; network: string | null; error: string | null; updatedAt: string; attempts: number }[];
+  payouts: { id: string; organizer: string; amount: number; status: "queued" | "sending" | "sent" | "failed" | "manual" | "void"; phone: string | null; network: string | null; error: string | null; updatedAt: string; attempts: number; userId: string; kind?: "organizer" | "refund" | "resale"; releaseAt?: string | null; trusted: boolean }[];
 }
 
-const PAYOUT_LABEL: Record<PaymentsData["payouts"][number]["status"], string> = { queued: "En attente", sending: "Envoyé, en confirmation", sent: "Reçu", failed: "Échec, nouvel essai", manual: "À faire à la main" };
+const PAYOUT_LABEL: Record<PaymentsData["payouts"][number]["status"], string> = { queued: "En attente", sending: "Envoyé, en confirmation", sent: "Reçu", failed: "Échec, nouvel essai", manual: "À faire à la main", void: "Annulé" };
+const KIND_LABEL = { organizer: "", refund: "Remboursement · ", resale: "Revente · " } as const;
 const INTENT_LABEL: Record<string, string> = { created: "Ouvert", pending: "En attente", paid: "Payé", failed: "Échoué", expired: "Expiré" };
 
 /** Paiements Mobile Money reçus et reversements aux organisateurs. */
@@ -529,6 +530,15 @@ function PaymentsAdmin() {
     try {
       setData(await api<PaymentsData>("POST", `/admin/payouts/${id}/${a}`));
       toast(a === "done" ? "Reversement marqué comme fait" : a === "send" ? "Reversement envoyé" : "Nouvel essai programmé");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const trust = async (userId: string, trusted: boolean) => {
+    if (!confirm(trusted ? "Organisateur de confiance : ses ventes de billets ne passeront plus par le séquestre (argent versé tout de suite). Continuer ?" : "Remettre le séquestre pour cet organisateur ?")) return;
+    try {
+      setData(await api<PaymentsData>("POST", `/admin/users/${userId}/trusted`, { trusted }));
+      toast(trusted ? "Organisateur de confiance" : "Séquestre rétabli");
     } catch (e) {
       toast((e as Error).message, "error");
     }
@@ -596,14 +606,18 @@ function PaymentsAdmin() {
         </ul>
       )}
       <h3 className="mt-4 text-sm font-bold">Reversements aux organisateurs</h3>
-      <p className="text-xs text-muted">Ils partent tout seuls après chaque vente (dès 1 000 FCFA cumulés, organisateur vérifié). « Reverser maintenant » force l'envoi. La commission ToBe se retire depuis SasPay → Retraits.</p>
+      <p className="text-xs text-muted">Ils partent tout seuls (dès 1 000 FCFA cumulés, organisateur vérifié). Billets : séquestre jusqu'à 24 h après l'événement, sauf organisateur de confiance. « Reverser maintenant » force l'envoi et lève le séquestre. La commission ToBe se retire depuis SasPay → Retraits.</p>
       <ul className="mt-1 divide-y divide-line text-sm">
         {data.payouts.slice(0, 15).map((p) => (
           <li key={p.id} className="flex items-center gap-3 py-2">
             <span className="min-w-0 flex-1">
-              <span className="block truncate">{p.organizer}</span>
+              <span className="block truncate">
+                {KIND_LABEL[p.kind ?? "organizer"]}
+                {p.organizer}
+              </span>
               <span className="text-xs text-muted">
                 {ago(p.updatedAt)} · {PAYOUT_LABEL[p.status]}
+                {p.status === "queued" && p.releaseAt && new Date(p.releaseAt) > new Date() ? ` · séquestre jusqu'au ${new Date(p.releaseAt).toLocaleDateString("fr-FR")}` : ""}
                 {p.phone ? ` · ${p.network ?? ""} +228 ${p.phone}` : " · pas de numéro"}
               </span>
             </span>
@@ -612,6 +626,11 @@ function PaymentsAdmin() {
               {p.status === "queued" && p.phone && (
                 <button className="rounded-full bg-brand px-2.5 py-1 text-[11px] font-semibold text-white" onClick={() => act(p.id, "send")}>
                   Reverser maintenant
+                </button>
+              )}
+              {(p.kind ?? "organizer") === "organizer" && (
+                <button className="text-[11px] font-semibold text-muted underline" onClick={() => trust(p.userId, !p.trusted)}>
+                  {p.trusted ? "De confiance ✓" : "Rendre de confiance"}
                 </button>
               )}
             </span>

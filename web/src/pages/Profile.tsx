@@ -7,6 +7,7 @@ import { Button, Empty, ErrorState, Field, PageLoader, Sheet, Toggle, TopBar, in
 import { Avatar, Logo } from "../components/visual";
 import { api, isDemo } from "../lib/api";
 import { ago, formatPhone, longDate } from "../lib/format";
+import { LanguagePicker } from "../components/LanguagePicker";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
@@ -104,6 +105,9 @@ export function Profile() {
         {me?.team && <Item to="/tobe" icon={<Sparkles />} label="Espace agence ToBe" sub={me.team.label} />}
       </div>
 
+      <div className="mx-5 mt-4">
+        <LanguagePicker />
+      </div>
       <div className="mx-5 mt-4 overflow-hidden rounded-[22px] border border-line bg-card">
         <div className="flex items-center gap-3 px-4 py-3.5">
           <span className="text-brand [&>svg]:size-5">

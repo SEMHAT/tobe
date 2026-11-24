@@ -1,21 +1,24 @@
 import { askNotifications, openInstall } from "../components/AppPrompts";
 import { isStandalone, pushState } from "../lib/push";
-import type { EventCard, Order } from "@tobe/core";
+import { dynamicQr, qrSecondsLeft, type EventCard, type Order } from "@tobe/core";
 import { CheckCircle2, ChevronRight, MapPin, Ticket as TicketIcon, WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Button, Empty, ErrorState, PageLoader, Segmented, TopBar } from "../components/ui";
 import { Poster, QR } from "../components/visual";
+import { RefundsCard, ResaleCard } from "../components/Refunds";
 import { api } from "../lib/api";
 import { formatFcfa, longDate, PAY_METHOD_LABELS, shortDate, time } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
-type MyTicket = Order & { event: EventCard | null; holder?: string };
+type MyTicket = Order & { event: EventCard | null; holder?: string; resale?: { id: string; price: number } | null };
 const CACHE = "tobe-tickets-cache";
 
 export function Tickets() {
   const { me, ready, requireAuth } = useSession();
+  const tr = useT();
   const [tab, setTab] = useState<"next" | "past">("next");
   const { data, error, loading } = useLoad(async () => {
     if (!me) return null;
@@ -45,14 +48,17 @@ export function Tickets() {
   });
   return (
     <div>
-      <TopBar title="Mes billets" />
+      <TopBar title={tr("tk.title")} />
       <div className="px-5 pt-4">
-        <Segmented value={tab} onChange={setTab} options={[{ value: "next", label: "À venir" }, { value: "past", label: "Passés" }]} />
+        <Segmented value={tab} onChange={setTab} options={[{ value: "next", label: tr("tk.next") }, { value: "past", label: tr("tk.past") }]} />
         {data?.offline && (
           <div className="mt-3 flex items-center gap-2 rounded-2xl bg-card px-4 py-3 text-sm text-muted">
             <WifiOff className="size-4" /> Hors connexion : billets enregistrés sur ce téléphone.
           </div>
         )}
+      </div>
+      <div className="pt-4">
+        <RefundsCard />
       </div>
       {loading && <PageLoader />}
       {error && <ErrorState message={error.message} />}
@@ -71,6 +77,7 @@ export function Tickets() {
                   {t.qty} × {t.ticketTypeName}
                 </span>
                 {t.status === "reserved" && <span className="inline-flex rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-muted">À payer à l'entrée</span>}
+                {t.resale && <span className="inline-flex rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-muted">En revente</span>}
               </div>
             </div>
             <div className="grid place-items-center border-l border-dashed border-line px-3">
@@ -91,7 +98,7 @@ export function TicketPage() {
     const raw = localStorage.getItem(CACHE);
     return raw ? ((JSON.parse(raw) as MyTicket[]).find((t) => t.id === id) ?? null) : null;
   });
-  const { data, error, loading } = useLoad(() => api<MyTicket>("GET", `/tickets/${id}`), [id]);
+  const { data, error, loading, reload } = useLoad(() => api<MyTicket>("GET", `/tickets/${id}`), [id]);
   const t = data ?? cached;
   // Billet tout juste pris : on propose d'activer les rappels sur le téléphone, puis d'installer l'application.
   useEffect(() => {
@@ -142,8 +149,7 @@ export function TicketPage() {
           </div>
         </Poster>
         <div className="grid place-items-center px-6 pb-4 pt-6">
-          <QR value={`TOBE:${t.code}`} size={220} />
-          <div className="mt-3 font-mono text-lg font-bold tracking-[0.25em]">{t.code}</div>
+          <LiveQr code={t.code} secret={t.secret} />
           {t.scannedCount > 0 && <div className="mt-1 text-sm font-semibold text-emerald-600">{t.scannedCount}/{t.qty} entrée(s) validée(s)</div>}
         </div>
         <div className="relative flex items-center">
@@ -158,6 +164,7 @@ export function TicketPage() {
           <Info label={t.status === "reserved" ? "À régler à l'entrée" : "Payé"} value={t.status === "reserved" ? formatFcfa(t.total) : t.total ? `${formatFcfa(t.total)} · ${PAY_METHOD_LABELS[t.method]}` : "Gratuit"} />
         </div>
       </div>
+      {!t.event?.cancelled && <ResaleCard ticket={t} onChange={reload} />}
       {e && (
         <div className="mx-5 mt-4 grid grid-cols-2 gap-3 lg:mx-auto lg:max-w-md">
           <a className="flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-card text-sm font-semibold" href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(`${e.venue}, ${e.city}`)}`} target="_blank" rel="noreferrer">
@@ -169,6 +176,35 @@ export function TicketPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** QR qui change toutes les 30 secondes : une capture d'écran revendue ne passe plus l'entrée. */
+function LiveQr({ code, secret }: { code: string; secret?: string }) {
+  const tr = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!secret) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [secret]);
+  if (!secret)
+    return (
+      <>
+        <QR value={`TOBE:${code}`} size={220} />
+        <div className="mt-3 font-mono text-lg font-bold tracking-[0.25em]">{code}</div>
+      </>
+    );
+  const left = qrSecondsLeft(now);
+  return (
+    <>
+      <QR value={dynamicQr(code, secret, now)} size={220} />
+      <div className="mt-3 h-1 w-40 overflow-hidden rounded-full bg-black/10">
+        <div className="h-full bg-emerald-500 transition-[width] duration-1000 ease-linear" style={{ width: `${(left / 30) * 100}%` }} />
+      </div>
+      <div className="mt-2 text-center text-xs text-black/55">{tr("tk.liveQr")}</div>
+      <div className="mt-1 font-mono text-sm font-bold tracking-[0.25em] text-black/60">{code}</div>
+    </>
   );
 }
 

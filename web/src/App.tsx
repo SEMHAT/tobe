@@ -20,6 +20,9 @@ import { Invitation } from "./pages/Invitation";
 import { EditEvent } from "./pages/EditEvent";
 import { PaymentReturn } from "./pages/PaymentReturn";
 import { Safety } from "./pages/Safety";
+import { GroupPage } from "./pages/Group";
+import { Observatory } from "./pages/Observatory";
+import { Privacy } from "./pages/Privacy";
 import { isCrawler } from "./lib/seo";
 
 function HomeGate() {
@@ -53,6 +56,9 @@ export function App() {
           <Route path="/organisateur/:id/modifier" element={<EditEvent />} />
           <Route path="/paiement/:id" element={<PaymentReturn />} />
           <Route path="/securite" element={<Safety />} />
+          <Route path="/groupe/:code" element={<GroupPage />} />
+          <Route path="/observatoire" element={<Observatory />} />
+          <Route path="/confidentialite" element={<Privacy />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/prestataires" element={<Providers />} />
           <Route path="/tobe" element={<TobeAdmin />} />

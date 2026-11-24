@@ -13,3 +13,4 @@ export * from "./team.js";
 export * from "./reminders.js";
 export * from "./saspay.js";
 export * from "./paymentFlow.js";
+export * from "./qr.js";

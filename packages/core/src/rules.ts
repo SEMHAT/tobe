@@ -13,6 +13,8 @@ export const PRICING = {
   payoutMin: 1000,
   /** Montant minimum pour un retrait demandé à la main. */
   withdrawMin: 500,
+  /** Revente officielle : ToBe garde 5 % (le vendeur reçoit le reste). */
+  resaleCommission: 0.05,
   premiumMonthly: 1000, // Pass ToBe Premium
   proMonthly: 15000, // abonnement Organisateur Pro
   boosts: {

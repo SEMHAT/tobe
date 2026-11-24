@@ -53,7 +53,7 @@ export async function runWithPayments(run: Runner, opts: FlowOptions, req: FlowR
   }
 
   // Tâche planifiée (toutes les 5 minutes) : filet de sécurité si un webhook s'est perdu.
-  if (method === "POST" && path === "/cron/payments") {
+  if ((method === "POST" || method === "GET") && path === "/cron/payments") {
     const r = await reconcile(internal, gw, log);
     const p = await processPayouts(internal, gw, log);
     return { status: 200, body: { ok: true, ...r, ...p } };
@@ -143,12 +143,12 @@ export async function processPayouts(internal: (m: string, p: string, b?: unknow
       log("suivi reversement", p.id, e);
     }
   }
-  const due = ((await internal("GET", "/internal/payouts/due")).body as { id: string; amount: number; phone: string; network: PayoutNetwork; name: string; email: string; attempts: number }[]) ?? [];
+  const due = ((await internal("GET", "/internal/payouts/due")).body as { id: string; amount: number; phone: string; network: PayoutNetwork; name: string; email: string; attempts: number; description?: string }[]) ?? [];
   for (const p of due.slice(0, 20)) {
     const lock = await internal("POST", `/internal/payouts/${p.id}/lock`);
     if (lock.status !== 200 || !lock.body) continue;
     try {
-      const r = await gw.payout({ amount: p.amount, phone: p.phone, network: p.network, name: p.name, email: p.email, description: "Vos gains ToBe", idempotencyKey: `${p.id}-${p.attempts + 1}` });
+      const r = await gw.payout({ amount: p.amount, phone: p.phone, network: p.network, name: p.name, email: p.email, description: p.description ?? "Vos gains ToBe", idempotencyKey: `${p.id}-${p.attempts + 1}` });
       await internal("POST", `/internal/payouts/${p.id}/record`, { status: "sending", gatewayId: r.id });
       sent++;
     } catch (e) {

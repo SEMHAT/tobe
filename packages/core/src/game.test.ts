@@ -125,8 +125,8 @@ test("visage : plusieurs captures cohérentes, meilleure reconnaissance", () => 
   const base = Array.from({ length: 128 }, (_, i) => Math.sin(i) / 4);
   const jitter = (k: number) => base.map((x, i) => x + Math.cos(i * k) * 0.02);
   const stranger = base.map((x, i) => -x + (i % 2 ? 0.1 : -0.1));
-  assert.throws(() => svc.setFace(user.id, [base, stranger]), (e: ApiError) => /même personne/.test(e.message));
-  const r = svc.setFace(user.id, [jitter(1), jitter(2), jitter(3)]);
+  assert.throws(() => svc.setFace(user.id, [base, stranger], true), (e: ApiError) => /même personne/.test(e.message));
+  const r = svc.setFace(user.id, [jitter(1), jitter(2), jitter(3)], true);
   assert.equal(r.user.hasFace, true);
   assert.ok(facesDistance([jitter(1), jitter(2), jitter(3)], [jitter(4)]) < 0.3);
   assert.ok(facesDistance([jitter(1), jitter(2)], [stranger]) > 0.5);

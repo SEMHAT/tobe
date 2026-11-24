@@ -12,12 +12,15 @@ interface Earnings {
   network: PayoutNetwork | null;
   pending: number;
   available: number;
+  escrow: number;
+  escrowUntil: string | null;
+  trusted: boolean;
   withdrawMin: number;
   canWithdraw: boolean;
   sent: number;
   min: number;
   commission: { ticket: number; vote: number; cagnotte: number };
-  payouts: { id: string; amount: number; status: "queued" | "sending" | "sent" | "failed" | "manual"; createdAt: string; eventTitle: string | null }[];
+  payouts: { id: string; amount: number; status: "queued" | "sending" | "sent" | "failed" | "manual" | "void"; releaseAt: string | null; createdAt: string; eventTitle: string | null }[];
 }
 
 const NETWORKS: { id: PayoutNetwork; label: string; color: string }[] = [
@@ -32,6 +35,7 @@ const STATUS: Record<Earnings["payouts"][number]["status"], string> = {
   sent: "Reçu",
   failed: "Nouvel essai bientôt",
   manual: "Traitement par ToBe",
+  void: "Annulé (événement annulé)",
 };
 
 const pct = (r: number) => `${Math.round(r * 100)} %`;
@@ -92,14 +96,19 @@ export function EarningsCard() {
           <div className="font-display text-lg font-bold text-brand">{formatFcfa(data.available)}</div>
         </div>
         <div className="rounded-2xl bg-card-2 p-3">
-          <div className="text-xs text-muted">En route</div>
-          <div className="font-display text-lg font-bold">{formatFcfa(data.pending - data.available)}</div>
+          <div className="text-xs text-muted">{data.escrow > 0 ? "En séquestre" : "En route"}</div>
+          <div className="font-display text-lg font-bold">{formatFcfa(data.escrow > 0 ? data.escrow : data.pending - data.available)}</div>
         </div>
         <div className="rounded-2xl bg-card-2 p-3">
           <div className="text-xs text-muted">Déjà reçu</div>
           <div className="font-display text-lg font-bold">{formatFcfa(data.sent)}</div>
         </div>
       </div>
+      {data.escrow > 0 && (
+        <p className="mt-3 rounded-2xl bg-card-2 p-3 text-xs text-muted">
+          <b className="text-ink">Séquestre :</b> l'argent des billets est gardé par ToBe jusqu'au {data.escrowUntil ? shortDate(data.escrowUntil) : "lendemain de l'événement"} (24 h après la fin), puis part tout seul sur votre Mobile Money. Si l'événement est annulé, les acheteurs sont remboursés. Après quelques événements réussis, ToBe vous passe « organisateur de confiance » : plus de séquestre.
+        </p>
+      )}
       <Button full className="mt-3" icon={<Wallet className="size-5" />} loading={withdrawing} disabled={!data.canWithdraw || data.available < data.withdrawMin} onClick={withdraw}>
         {data.available > 0 ? `Retirer ${formatFcfa(data.available)} maintenant` : "Retirer"}
       </Button>
