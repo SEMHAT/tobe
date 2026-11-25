@@ -1382,12 +1382,14 @@ export class ToBeService {
   recordPayout(payoutId: string, r: { status: "sending" | "sent" | "failed" | "manual"; gatewayId?: string | null; error?: string | null }) {
     const p = this.db.payouts.get(payoutId);
     if (!p) return null;
+    // Après 5 échecs, on arrête de réessayer en silence : l'équipe est prévenue.
+    if (r.status === "failed" && p.attempts >= 5) r = { ...r, status: "manual", error: `5 essais échoués : ${r.error ?? "erreur SasPay"}` };
     const next = this.db.payouts.update(p.id, { status: r.status, gatewayId: r.gatewayId ?? p.gatewayId, error: r.error ?? null, updatedAt: this.iso() });
     if (r.status === "sent" && p.status !== "sent" && p.kind === "refund") this.notify(p.userId, "Remboursement envoyé", `${p.amount.toLocaleString("fr-FR")} FCFA renvoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/billets");
     else if (r.status === "sent" && p.status !== "sent" && p.kind === "resale") this.notify(p.userId, "Billet revendu : argent reçu", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/billets");
     else if (r.status === "sent" && p.status !== "sent") this.notify(p.userId, "Vos gains sont arrivés", `${p.amount.toLocaleString("fr-FR")} FCFA envoyés sur votre Mobile Money ${p.phone ?? ""}.`, "/organisateur");
     if (r.status === "manual" && p.status !== "manual")
-      for (const u of this.db.users.filter((x) => this.team.can(x, "team.manage"))) this.notify(u.id, "Reversement à faire", `${p.amount.toLocaleString("fr-FR")} FCFA à envoyer à un organisateur : ${r.error ?? ""}`, "/tobe");
+      for (const u of this.db.users.filter((x) => this.team.can(x, "team.manage"))) this.notify(u.id, p.kind === "refund" ? "Remboursement bloqué" : "Reversement à faire", `${p.amount.toLocaleString("fr-FR")} FCFA à envoyer ${p.kind === "refund" ? "à un acheteur (remboursement)" : p.kind === "resale" ? "au vendeur d'un billet revendu" : "à un organisateur"} : ${r.error ?? ""}`, "/tobe");
     return next;
   }
 

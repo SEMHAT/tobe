@@ -75,8 +75,8 @@ export function RefundsCard() {
                   ? `Remboursé sur +228 ${r.phone}`
                   : r.needsNumber
                     ? "Indiquez votre numéro Mobile Money pour être remboursé."
-                    : r.status === "manual"
-                      ? "L'équipe ToBe envoie votre remboursement à la main."
+                    : r.status === "manual" || r.status === "failed"
+                      ? "Petit retard : l'équipe ToBe s'occupe de votre remboursement et vous prévient dès l'envoi."
                       : `Remboursement en route vers +228 ${r.phone}.`}
               </div>
             </div>

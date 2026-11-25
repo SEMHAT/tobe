@@ -154,8 +154,18 @@ export async function processPayouts(internal: (m: string, p: string, b?: unknow
     } catch (e) {
       const g = e instanceof GatewayError ? e : null;
       // IP du serveur non autorisée chez SasPay : le reversement se fera depuis le tableau de bord.
-      const manual = g?.code === "ip_not_whitelisted" || g?.code === "api_key_scope_forbidden";
-      const msg = manual ? (g?.code === "ip_not_whitelisted" ? "Reversement automatique bloqué : IP du serveur à autoriser chez SasPay" : "Clé API sans droit de décaissement") : ((e as Error).message ?? "Échec");
+      const raw = (e as Error).message ?? "Échec";
+      // Blocages côté compte SasPay : inutile de réessayer, l'équipe doit agir (puis « Réessayer »).
+      const disabled = /non activ|not (enabled|activated)|disabled/i.test(raw);
+      const manual = g?.code === "ip_not_whitelisted" || g?.code === "api_key_scope_forbidden" || disabled;
+      const msg =
+        g?.code === "ip_not_whitelisted"
+          ? "Reversement automatique bloqué : IP du serveur à autoriser chez SasPay"
+          : g?.code === "api_key_scope_forbidden"
+            ? "Clé API sans droit de décaissement"
+            : disabled
+              ? "Décaissements non activés sur le compte SasPay : demandez l'activation à SasPay, puis cliquez « Réessayer »"
+              : raw;
       log("reversement", p.id, e);
       await internal("POST", `/internal/payouts/${p.id}/record`, { status: manual ? "manual" : "failed", error: msg });
     }
