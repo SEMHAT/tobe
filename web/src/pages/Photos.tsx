@@ -12,10 +12,7 @@ import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 import { PRICING } from "@tobe/core";
 
-interface PhotoGroup {
-  event: EventCard;
-  photos: { id: string; url: string; width: number; height: number; distance: number }[];
-}
+import { PhotoPassGallery, type PhotoGroup } from "../components/PhotoPass";
 
 export function Photos() {
   const { me, ready, requireAuth, refresh, toast, payments } = useSession();
@@ -89,7 +86,7 @@ export function Photos() {
             <Button full size="lg" variant="white" className="relative mt-6" onClick={startPass} icon={<ScanFace className="size-5" />}>
               Activer mon Pass ToBe
             </Button>
-            <button onClick={() => setScan("once")} className="relative mt-3 w-full text-center text-sm font-semibold text-white/70">
+            <button onClick={async () => (await requireAuth("Connectez-vous pour retrouver et télécharger vos photos.")) && setScan("once")} className="relative mt-3 w-full text-center text-sm font-semibold text-white/70">
               Juste chercher, sans enregistrer mon visage
             </button>
           </div>
@@ -112,8 +109,8 @@ export function Photos() {
               <span className="flex-1">Pass ToBe actif : vous serez prévenu à chaque nouvelle galerie.</span>
             </div>
           )}
-          {loading && !once && <PageLoader />}
-          {!loading || once ? (
+          {loading && !groups && !once && <PageLoader />}
+          {!loading || groups || once ? (
             total === 0 ? (
               <Empty icon={<Camera className="size-7" />} title="Pas encore de photo de vous" text="Dès que les organisateurs publient leurs galeries, vos photos apparaissent ici." action={<Link to="/explorer" className="font-semibold text-brand">Découvrir des événements</Link>} />
             ) : (
@@ -122,12 +119,12 @@ export function Photos() {
                   {total} photo{total > 1 ? "s" : ""} de vous
                 </div>
                 {shown.map((g) => (
-                  <Gallery key={g.event.id} g={g} premium={!!me?.premium || !payments} onRemoved={() => reload()} />
+                  <PhotoPassGallery key={g.event.id} g={g} canBuy={!!payments && !!me} onChange={() => (once ? setOnce(once) : reload())} />
                 ))}
               </div>
             )
           ) : null}
-          {passOn && !me?.premium && payments && <PremiumCard />}
+          {payments && <PhotoOffersInfo />}
         </div>
       )}
 
@@ -146,153 +143,19 @@ function Li({ icon, children }: { icon: React.ReactNode; children: React.ReactNo
   );
 }
 
-function Gallery({ g, premium, onRemoved }: { g: PhotoGroup; premium: boolean; onRemoved: () => void }) {
-  const [sel, setSel] = useState<string[]>([]);
-  const [view, setView] = useState<PhotoGroup["photos"][number] | null>(null);
-  const { toast } = useSession();
-  const picked = g.photos.filter((p) => sel.includes(p.id));
-
-  const download = async (list: PhotoGroup["photos"]) => {
-    for (const p of list) {
-      const blob = await renderPhoto(p.url, premium);
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `ToBe-${g.event.slug}-${p.id}.jpg`;
-      a.click();
-    }
-    toast(`${list.length} photo${list.length > 1 ? "s" : ""} téléchargée${list.length > 1 ? "s" : ""}`);
-  };
-  const share = async (list: PhotoGroup["photos"]) => {
-    const files = await Promise.all(list.map(async (p) => new File([await renderPhoto(p.url, premium)], `ToBe-${p.id}.jpg`, { type: "image/jpeg" })));
-    if (navigator.canShare?.({ files })) await navigator.share({ files, title: g.event.title }).catch(() => {});
-    else download(list);
-  };
-  const remove = async (id: string) => {
-    try {
-      await api("DELETE", `/photos/${id}`);
-      toast("Photo retirée de la galerie");
-      setView(null);
-      onRemoved();
-    } catch (e) {
-      toast((e as Error).message, "error");
-    }
-  };
-
+/** Rappel des formules (par événement). */
+function PhotoOffersInfo() {
   return (
-    <section className="mt-5">
-      <Link to={`/evenement/${g.event.slug}`} className="mb-3 flex items-center gap-3">
-        <Poster cover={g.event.cover} theme={g.event.theme} category={g.event.category} className="size-11 rounded-xl" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-display font-bold">{g.event.title}</div>
-          <div className="text-xs text-muted">
-            {shortDate(g.event.startsAt)} · {g.photos.length} photo{g.photos.length > 1 ? "s" : ""}
-          </div>
-        </div>
-      </Link>
-      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-6 lg:gap-2">
-        {g.photos.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => (sel.length ? setSel(sel.includes(p.id) ? sel.filter((x) => x !== p.id) : [...sel, p.id]) : setView(p))}
-            onContextMenu={(e) => (e.preventDefault(), setSel([...sel, p.id]))}
-            className="relative aspect-square overflow-hidden rounded-xl"
-          >
-            <Img src={p.url} className="size-full object-cover" />
-            {sel.length > 0 && <span className={cx("absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full border-2 border-white", sel.includes(p.id) ? "bg-brand" : "bg-black/30")}>{sel.includes(p.id) && <CheckCircle2 className="size-4 text-white" />}</span>}
-          </button>
-        ))}
+    <Card className="mb-8 mt-6 p-5">
+      <div className="flex items-center gap-2 font-display text-lg font-extrabold">
+        <Crown className="size-5 text-brand" /> Vos photos, par événement
       </div>
-      <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="dark" onClick={() => setSel(sel.length ? [] : g.photos.map((p) => p.id))}>
-          {sel.length ? "Annuler" : "Sélectionner"}
-        </Button>
-        <Button size="sm" variant="dark" icon={<Download className="size-4" />} onClick={() => download(picked.length ? picked : g.photos)}>
-          {picked.length ? `Télécharger (${picked.length})` : "Tout télécharger"}
-        </Button>
-        <Button size="sm" variant="dark" icon={<Share2 className="size-4" />} onClick={() => share(picked.length ? picked : g.photos.slice(0, 10))}>
-          Partager
-        </Button>
-      </div>
-      <Sheet open={!!view} onClose={() => setView(null)} title={g.event.title}>
-        {view && (
-          <div className="space-y-3">
-            <Img src={view.url} className="w-full rounded-2xl" />
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="dark" icon={<Download className="size-4" />} onClick={() => download([view])}>
-                Télécharger {premium ? "HD" : ""}
-              </Button>
-              <Button variant="dark" icon={<Share2 className="size-4" />} onClick={() => share([view])}>
-                Partager
-              </Button>
-            </div>
-            <Button full variant="danger" icon={<Trash2 className="size-4" />} onClick={() => remove(view.id)}>
-              Retirer cette photo de la galerie
-            </Button>
-            {!premium && <p className="text-center text-xs text-faint">Téléchargement avec un petit filigrane ToBe. Sans filigrane avec le Pass Premium.</p>}
-          </div>
-        )}
-      </Sheet>
-    </section>
-  );
-}
-
-async function renderPhoto(url: string, premium: boolean): Promise<Blob> {
-  const src = url.startsWith("idb:") ? await resolveMedia(url) : absoluteMedia(url);
-  const img = await loadImage(src);
-  const c = document.createElement("canvas");
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  const ctx = c.getContext("2d")!;
-  ctx.drawImage(img, 0, 0);
-  if (!premium) {
-    const s = Math.max(14, Math.round(c.width / 38));
-    ctx.font = `700 ${s}px Sora, Inter, sans-serif`;
-    const text = "ToBe · tobe.eledji.com";
-    const w = ctx.measureText(text).width;
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.fillRect(c.width - w - s * 1.6, c.height - s * 2.2, w + s * 1.2, s * 1.6);
-    ctx.fillStyle = "#1800ad";
-    ctx.fillText(text, c.width - w - s, c.height - s * 0.95);
-  }
-  return new Promise((res) => c.toBlob((b) => res(b!), "image/jpeg", 0.92));
-}
-
-function PremiumCard() {
-  const { requireAuth, toast, refresh } = useSession();
-  const [busy, setBusy] = useState(false);
-  return (
-    <Card className="mb-8 mt-6 overflow-hidden">
-      <div className="brand-gradient px-5 py-4 text-white">
-        <div className="flex items-center gap-2 font-display text-lg font-extrabold">
-          <Crown className="size-5" /> Pass ToBe Premium
-        </div>
-        <div className="text-sm font-medium">{formatFcfa(PRICING.premiumMonthly)} / mois</div>
-      </div>
-      <ul className="space-y-1.5 px-5 py-4 text-sm text-muted">
-        <li>• Photos en HD, sans filigrane</li>
-        <li>• Album annuel de vos événements</li>
-        <li>• Accès prioritaire aux billets</li>
+      <ul className="mt-3 space-y-1.5 text-sm text-muted">
+        <li>• Gratuit : {PRICING.photoFreeCount} photos avec logo ToBe</li>
+        <li>• {formatFcfa(PRICING.photoPrices.plus)} : toutes vos photos avec logo</li>
+        <li>• {formatFcfa(PRICING.photoPrices.clean)} : toutes vos photos sans logo</li>
+        <li>• {formatFcfa(PRICING.photoPrices.hd)} : toutes en Full HD sans logo, et 3 proches en plus</li>
       </ul>
-      <div className="px-5 pb-5">
-        <Button
-          full
-          loading={busy}
-          onClick={async () => {
-            if (!(await requireAuth())) return;
-            setBusy(true);
-            try {
-              await api("POST", "/me/subscribe", { plan: "premium", method: "mixx" });
-              await refresh();
-              toast("Pass Premium activé pour 30 jours");
-            } catch (e) {
-              toast((e as Error).message, "error");
-            }
-            setBusy(false);
-          }}
-        >
-          Passer Premium
-        </Button>
-      </div>
     </Card>
   );
 }

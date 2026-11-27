@@ -7,6 +7,8 @@ const ROWS: { icon: typeof Clock; title: string; text: string }[] = [
   { icon: ShieldCheck, title: "Seulement avec votre accord", text: "Rien n'est activé sans la case cochée. La date et la version du texte accepté sont enregistrées. La recherche ponctuelle par selfie n'enregistre rien." },
   { icon: Clock, title: "Durées de conservation", text: "Votre empreinte est effacée automatiquement après 12 mois sans utilisation. Les empreintes calculées sur les photos d'un événement sont effacées 6 mois après l'événement : les photos restent, la recherche par visage s'arrête." },
   { icon: Trash2, title: "Effacer en un geste", text: "Photos → Réglages → « Supprimer mes données de visage » efface tout de suite votre empreinte. La suppression de votre compte efface aussi vos données." },
+  { icon: ShieldCheck, title: "Visages de vos proches (pack Full HD)", text: "Un adulte ajouté reçoit un lien : c'est lui qui donne son accord et fait son selfie, et il peut le retirer avec le même lien. Pour un enfant, seul le parent ou le tuteur légal peut l'ajouter, en l'attestant. Ces visages ne servent qu'à l'événement concerné et sont effacés 6 mois après." },
+  { icon: Clock, title: "Photos protégées", text: "La galerie publique ne montre que des aperçus filigranés. Les versions avec logo, sans logo et Full HD ne sont remises qu'aux personnes qui apparaissent sur la photo, selon leur formule." },
   { icon: EyeOff, title: "Retirer une photo de vous", text: "Sur toute photo où ToBe vous reconnaît, « Retirer » la supprime de la galerie. L'option « Ne jamais me montrer » vous cache des galeries publiques." },
 ];
 

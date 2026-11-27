@@ -45,7 +45,10 @@ import type {
   TobeRequest,
   User,
   Visibility,
- TicketGroup } from "./types.js";
+  TicketGroup,
+  PhotoGuest,
+  PhotoTier,
+} from "./types.js";
 
 import { ApiError } from "./errors.js";
 import { checkDynamicQr, parseQr } from "./qr.js";
@@ -1022,7 +1025,7 @@ export class ToBeService {
     return p;
   }
 
-  private recordPayment(p: { userId: string; kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro"; refId: string; eventId: string | null; amount: number; platformFee: number; method: PayMethod; intentId?: string | null; organizerShare?: number; organizerId?: string | null }) {
+  private recordPayment(p: { userId: string; kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro" | "photos"; refId: string; eventId: string | null; amount: number; platformFee: number; method: PayMethod; intentId?: string | null; organizerShare?: number; organizerId?: string | null }) {
     return this.db.payments.insert({ id: newId("pay"), createdAt: this.iso(), ...p });
   }
 
@@ -1272,6 +1275,13 @@ export class ToBeService {
         const e = this.db.events.get(a.eventId);
         this.notify(i.userId, "Paiement reçu, vos billets sont prêts", `${a.qty} billet${a.qty > 1 ? "s" : ""} pour ${e?.title ?? "l'événement"}. Présentez le QR code à l'entrée.`, "/billets");
         if (e) this.notify(e.organizerId, "Nouvelle vente", `${a.qty} billet${a.qty > 1 ? "s" : ""} ${o.ticketTypeName} vendu${a.qty > 1 ? "s" : ""} pour ${e.title}.`, `/organisateur/${e.id}`);
+      } else if (a.kind === "photos") {
+        const r = this.buyPhotoPass(i.userId, a.eventId, a.tier, "online", paid);
+        ref = this.photoPass(i.userId, a.eventId)?.id ?? null;
+        link = `/photos?event=${a.eventId}`;
+        const e = this.db.events.get(a.eventId);
+        this.notify(i.userId, "Photos débloquées", r.tier === "hd" ? "Toutes vos photos en Full HD, sans logo. Ajoutez jusqu'à 3 proches." : r.tier === "clean" ? "Toutes vos photos sans logo." : "Toutes vos photos de l'événement.", link);
+        if (e) this.notify(e.organizerId, "Vente de photos", `Un participant a acheté ses photos de ${e.title}.`, `/organisateur/${e.id}`);
       } else if (a.kind === "resale") {
         const o = this.buyResale(i.userId, a.resaleId, { method: "online" }, paid);
         ref = o.id;
@@ -2038,16 +2048,16 @@ export class ToBeService {
     return this.db.photos
       .filter((p) => p.eventId === e.id)
       .filter((p) => !hidden.some((mine) => facesMatch(mine, p.faces)))
-      .map(({ faces, ...p }) => ({ ...p, faceCount: faces.length }))
+      .map((p) => ({ id: p.id, eventId: p.eventId, url: p.url, width: p.width, height: p.height, createdAt: p.createdAt, faceCount: p.faces.length }))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  addPhotos(userId: string, idOrSlug: string, photos: { url: string; width: number; height: number; faces: number[][] }[]) {
+  addPhotos(userId: string, idOrSlug: string, photos: { url: string; logoUrl?: string | null; cleanUrl?: string | null; hdUrl?: string | null; width: number; height: number; faces: number[][] }[]) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!this.team.access(e, user).photos) throw new ApiError(403, "Seuls l'organisateur et ses photographes peuvent déposer des photos");
     const added: Photo[] = photos.map((p) =>
-      this.db.photos.insert({ id: newId("pho"), eventId: e.id, url: p.url, width: p.width, height: p.height, faces: (p.faces ?? []).filter((f) => Array.isArray(f) && f.length === 128), uploadedBy: user.id, createdAt: this.iso() }),
+      this.db.photos.insert({ id: newId("pho"), eventId: e.id, url: p.url, logoUrl: p.logoUrl ?? null, cleanUrl: p.cleanUrl ?? null, hdUrl: p.hdUrl ?? null, width: p.width, height: p.height, faces: (p.faces ?? []).filter((f) => Array.isArray(f) && f.length === 128), uploadedBy: user.id, createdAt: this.iso() }),
     );
     if (!e.options.gallery) this.db.events.update(e.id, { options: { ...e.options, gallery: true } });
     // Pass ToBe : on prévient automatiquement chaque personne reconnue.
@@ -2058,7 +2068,7 @@ export class ToBeService {
       const n = added.filter((p) => facesMatch(mine, p.faces)).length;
       if (n > 0) {
         const total = this.db.photos.filter((p) => p.eventId === e.id && facesMatch(mine, p.faces)).length;
-        this.notify(u.id, `Vous êtes sur ${total} photo${total > 1 ? "s" : ""} de ${e.title}`, "Retrouvez-les dans Mes photos et téléchargez-les en HD.", `/photos?event=${e.id}`);
+        this.notify(u.id, `Vous êtes sur ${total} photo${total > 1 ? "s" : ""} de ${e.title}`, `Retrouvez-les dans Mes photos : ${PRICING.photoFreeCount} offertes, toutes dès ${PRICING.photoPrices.plus} F.`, `/photos?event=${e.id}`);
         notified.push(u.id);
       }
     }
@@ -2127,6 +2137,9 @@ export class ToBeService {
       this.db.photos.update(p.id, { faces: [] });
       photos++;
     }
+    // Visages des proches (pack Full HD) : effacés avec ceux des photos.
+    for (const pass of this.db.photoPasses.filter((x) => old.has(x.eventId) && x.guests.some((g) => g.descriptors.length > 0)))
+      this.db.photoPasses.update(pass.id, { guests: pass.guests.map((g) => ({ ...g, descriptors: [], status: g.status === "active" ? "revoked" : g.status })) });
     return { accounts, photos };
   }
 
@@ -2136,7 +2149,7 @@ export class ToBeService {
     if (!mine.length) return [];
     // Empreinte utilisée : le compteur des 12 mois repart (une fois par jour au plus).
     if (!user.faceUsedAt || this.now().getTime() - new Date(user.faceUsedAt).getTime() > 86400_000) this.db.users.update(user.id, { faceUsedAt: this.iso() });
-    return this.matchPhotos(mine, user);
+    return this.decorate(this.matchPhotos(mine, user), user);
   }
 
   /** Recherche ponctuelle par selfie, sans enregistrer le visage. */
@@ -2144,11 +2157,14 @@ export class ToBeService {
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
     const samples = (Array.isArray(input?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
     if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu");
-    return this.matchPhotos(samples, user, eventId);
+    const groups = this.matchPhotos(samples, user, eventId);
+    // Connecté : ces photos pourront être débloquées pendant 24 h sans enregistrer le visage.
+    if (user) this.db.users.update(user.id, { selfieMatches: { ids: groups.flatMap((g) => g.photos.map((p) => p.id)).slice(0, 500), at: this.iso() } });
+    return user ? this.decorate(groups, this.db.users.get(user.id)!) : groups;
   }
 
   private matchPhotos(mine: number[][], user: User | null, eventId?: string) {
-    const groups = new Map<string, { event: EventCard; photos: (Omit<Photo, "faces"> & { distance: number })[] }>();
+    const groups = new Map<string, { event: EventCard; photos: (Pick<Photo, "id" | "eventId" | "url" | "width" | "height" | "uploadedBy" | "createdAt"> & { distance: number; guest?: string })[] }>();
     for (const p of this.db.photos.all()) {
       if (eventId && p.eventId !== eventId) continue;
       const d = facesDistance(mine, p.faces);
@@ -2156,10 +2172,205 @@ export class ToBeService {
       const e = this.db.events.get(p.eventId);
       if (!e || !this.canView(e, user)) continue;
       if (!groups.has(e.id)) groups.set(e.id, { event: this.toCard(e), photos: [] });
-      const { faces, ...rest } = p;
-      groups.get(e.id)!.photos.push({ ...rest, distance: Math.round(d * 1000) / 1000 });
+      groups.get(e.id)!.photos.push({ id: p.id, eventId: p.eventId, url: p.url, width: p.width, height: p.height, uploadedBy: p.uploadedBy, createdAt: p.createdAt, distance: Math.round(d * 1000) / 1000 });
     }
     return [...groups.values()].sort((a, b) => b.event.startsAt.localeCompare(a.event.startsAt));
+  }
+
+  // =====================================================================
+  // Formules photos par événement
+  // =====================================================================
+  private static TIER_RANK: Record<PhotoTier, number> = { free: 0, plus: 1, clean: 2, hd: 3 };
+
+  private photoPass(userId: string, eventId: string) {
+    return this.db.photoPasses.find((p) => p.userId === userId && p.eventId === eventId);
+  }
+
+  /** Formule de l'utilisateur pour un événement (l'ancien Pass Premium vaut « sans logo »). */
+  photoTier(user: User, eventId: string): PhotoTier {
+    const t = this.photoPass(user.id, eventId)?.tier ?? "free";
+    const premium = !!user.premiumUntil && new Date(user.premiumUntil) > this.now();
+    return premium && ToBeService.TIER_RANK[t] < 2 ? "clean" : t;
+  }
+
+  /** Les photos où l'utilisateur apparaît (son visage, sa dernière recherche par selfie, ou un proche ajouté). */
+  private photoIsMine(user: User, p: Photo): string | true | false {
+    const mine = userFaces(user);
+    if (mine.length && facesMatch(mine, p.faces)) return true;
+    const s = user.selfieMatches;
+    if (s && this.now().getTime() - new Date(s.at).getTime() < 86400_000 && s.ids.includes(p.id)) return true;
+    const pass = this.photoPass(user.id, p.eventId);
+    if (pass?.tier === "hd") for (const g of pass.guests) if (g.status === "active" && g.descriptors.length && facesMatch(g.descriptors, p.faces)) return g.name;
+    return false;
+  }
+
+  /** Ajoute à chaque événement la formule, les photos des proches (Full HD) et ce qui est débloqué. */
+  private decorate(groups: ReturnType<ToBeService["matchPhotos"]>, user: User) {
+    // Photos des proches ajoutés (formule Full HD).
+    for (const pass of this.db.photoPasses.filter((p) => p.userId === user.id && p.tier === "hd" && p.guests.some((g) => g.status === "active"))) {
+      const e = this.db.events.get(pass.eventId);
+      if (!e) continue;
+      let g = groups.find((x) => x.event.id === e.id);
+      for (const ph of this.db.photos.filter((x) => x.eventId === e.id)) {
+        if (g?.photos.some((x) => x.id === ph.id)) continue;
+        const who = pass.guests.find((gu) => gu.status === "active" && gu.descriptors.length && facesMatch(gu.descriptors, ph.faces));
+        if (!who) continue;
+        if (!g) {
+          g = { event: this.toCard(e), photos: [] };
+          groups.push(g);
+        }
+        g.photos.push({ id: ph.id, eventId: ph.eventId, url: ph.url, width: ph.width, height: ph.height, uploadedBy: ph.uploadedBy, createdAt: ph.createdAt, distance: 0, guest: who.name });
+      }
+    }
+    return groups
+      .sort((a, b) => b.event.startsAt.localeCompare(a.event.startsAt))
+      .map((g) => {
+        const tier = this.photoTier(user, g.event.id);
+        const pass = this.photoPass(user.id, g.event.id);
+        const picks = pass?.picks ?? [];
+        return {
+          ...g,
+          tier,
+          paid: pass?.paid ?? 0,
+          freeLeft: Math.max(0, PRICING.photoFreeCount - picks.length),
+          guests: (pass?.guests ?? []).filter((x) => x.status !== "revoked").map((x) => ({ id: x.id, name: x.name, kind: x.kind, status: x.status, code: x.status === "pending" ? x.code : null })),
+          photos: g.photos.map((p) => ({ ...p, unlocked: tier !== "free" || picks.includes(p.id) })),
+        };
+      });
+  }
+
+  /** Téléchargement : la version permise par la formule (3 photos offertes avec logo, puis payant). */
+  downloadPhoto(userId: string, photoId: string) {
+    const user = this.requireUser(userId);
+    const p = this.db.photos.get(photoId);
+    if (!p) throw new ApiError(404, "Photo introuvable");
+    const e = this.db.events.get(p.eventId);
+    const staff = !!e && this.team.access(e, user).photos;
+    if (!staff && !this.photoIsMine(user, p)) throw new ApiError(403, "Vous n'apparaissez pas sur cette photo");
+    // Anciennes photos (une seule version) : comme avant.
+    if (!p.logoUrl) return { url: p.url, tier: "legacy" as const };
+    if (staff) return { url: p.hdUrl ?? p.cleanUrl ?? p.logoUrl, tier: "hd" as PhotoTier };
+    const tier = this.photoTier(user, p.eventId);
+    if (tier === "free") {
+      let pass = this.photoPass(user.id, p.eventId);
+      if (!pass?.picks.includes(p.id)) {
+        if ((pass?.picks.length ?? 0) >= PRICING.photoFreeCount)
+          throw new ApiError(402, `Vos ${PRICING.photoFreeCount} photos offertes sont utilisées. Débloquez toutes vos photos de cet événement dès ${PRICING.photoPrices.plus} F.`);
+        pass = pass
+          ? this.db.photoPasses.update(pass.id, { picks: [...pass.picks, p.id], updatedAt: this.iso() })
+          : this.db.photoPasses.insert({ id: newId("pps"), userId: user.id, eventId: p.eventId, tier: "free", paid: 0, picks: [p.id], guests: [], createdAt: this.iso(), updatedAt: this.iso() });
+      }
+      return { url: p.logoUrl, tier, freeLeft: PRICING.photoFreeCount - pass.picks.length };
+    }
+    const url = tier === "plus" ? p.logoUrl : tier === "clean" ? (p.cleanUrl ?? p.logoUrl) : (p.hdUrl ?? p.cleanUrl ?? p.logoUrl);
+    return { url, tier };
+  }
+
+  /** Acheter (ou monter de) formule photo pour un événement : on ne paie que la différence. 70 % pour l'organisateur. */
+  buyPhotoPass(userId: string, idOrSlug: string, tier: PhotoTier, method: PayMethod, settle?: PaymentIntent | null) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    if (!["plus", "clean", "hd"].includes(tier)) throw new ApiError(400, "Formule inconnue");
+    if (!settle) this.requirePayments("Formules photos");
+    const pass = this.photoPass(user.id, e.id);
+    const current = pass?.tier ?? "free";
+    if (!settle && ToBeService.TIER_RANK[current] >= ToBeService.TIER_RANK[tier]) throw new ApiError(400, "Vous avez déjà cette formule (ou mieux) pour cet événement");
+    const price = Math.max(0, PRICING.photoPrices[tier] - (pass?.paid ?? 0));
+    if (price <= 0 && !settle) throw new ApiError(400, "Rien à payer");
+    if (this.needsCheckout(price, settle)) {
+      const label = { plus: "Toutes mes photos", clean: "Toutes mes photos sans logo", hd: "Pack Full HD + 3 visages" }[tier as "plus" | "clean" | "hd"];
+      return this.openIntent(user.id, { kind: "photos", eventId: e.id, tier }, price, e.id, `${label} · ${e.title}`) as never;
+    }
+    const amount = settle ? settle.amount : price;
+    const saved = pass
+      ? this.db.photoPasses.update(pass.id, (p) => ({ ...p, tier: ToBeService.TIER_RANK[tier] > ToBeService.TIER_RANK[p.tier] ? tier : p.tier, paid: p.paid + amount, updatedAt: this.iso() }))
+      : this.db.photoPasses.insert({ id: newId("pps"), userId: user.id, eventId: e.id, tier, paid: amount, picks: [], guests: [], createdAt: this.iso(), updatedAt: this.iso() });
+    if (amount > 0) this.pay(user.id, "photos", saved.id, e.id, amount, Math.round(amount * PRICING.photoCommission), method, settle, settle ? e.organizerId : null);
+    return { tier: saved.tier, paid: saved.paid };
+  }
+
+  // ---------- Formule Full HD : 3 visages de proches, avec leur accord ----------
+
+  private hdPass(userId: string, eventId: string) {
+    const pass = this.photoPass(userId, eventId);
+    if (pass?.tier !== "hd") throw new ApiError(400, `L'ajout de visages fait partie du pack Full HD (${PRICING.photoPrices.hd} F)`);
+    return pass;
+  }
+
+  /**
+   * Adulte : on crée un lien ; la personne donne elle-même son accord et son visage.
+   * Enfant : le parent capture le visage et atteste avoir l'autorité parentale.
+   */
+  addPhotoGuest(userId: string, idOrSlug: string, input: { name: string; kind: "adult" | "child"; descriptors?: number[][]; attest?: boolean }) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    const pass = this.hdPass(user.id, e.id);
+    if (pass.guests.filter((g) => g.status !== "revoked").length >= PRICING.photoGuestsMax) throw new ApiError(400, `${PRICING.photoGuestsMax} visages au maximum`);
+    const name = String(input.name ?? "").trim().slice(0, 40);
+    if (name.length < 2) throw new ApiError(400, "Indiquez le prénom de la personne");
+    const kind = input.kind === "child" ? "child" : "adult";
+    let descriptors: number[][] = [];
+    if (kind === "child") {
+      if (input.attest !== true) throw new ApiError(400, "Confirmez que vous êtes le parent ou le tuteur légal de l'enfant");
+      descriptors = this.checkSamples(input.descriptors);
+    }
+    const guest: PhotoGuest = { id: newId("vis"), name, kind, code: randomCode(8), status: kind === "child" ? "active" : "pending", descriptors, consentAt: kind === "child" ? this.iso() : null, createdAt: this.iso() };
+    this.db.photoPasses.update(pass.id, { guests: [...pass.guests, guest], updatedAt: this.iso() });
+    return { id: guest.id, code: guest.code, status: guest.status };
+  }
+
+  private checkSamples(input: unknown) {
+    const samples = (Array.isArray((input as number[][])?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
+    if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
+    for (let i = 0; i < samples.length; i++)
+      for (let j = i + 1; j < samples.length; j++)
+        if (faceDistance(samples[i], samples[j]) > FACE_CONSISTENCY_MAX) throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez.");
+    return samples;
+  }
+
+  private guestByCode(code: string) {
+    const c = String(code ?? "").toUpperCase();
+    for (const pass of this.db.photoPasses.all()) {
+      const g = pass.guests.find((x) => x.code === c);
+      if (g) return { pass, guest: g };
+    }
+    throw new ApiError(404, "Lien introuvable ou expiré");
+  }
+
+  /** Page d'accord vue par la personne invitée. */
+  photoGuestInvite(code: string) {
+    const { pass, guest } = this.guestByCode(code);
+    const owner = this.db.users.get(pass.userId);
+    const e = this.db.events.get(pass.eventId);
+    return { name: guest.name, status: guest.status, owner: owner?.name || "Un participant", eventTitle: e?.title ?? "l'événement", eventDate: e?.startsAt ?? null };
+  }
+
+  /** La personne invitée accepte : son visage sert seulement à retrouver ses photos de cet événement pour la personne qui l'a invitée. */
+  acceptPhotoGuest(code: string, descriptors: unknown, consent: unknown) {
+    const { pass, guest } = this.guestByCode(code);
+    if (guest.status === "revoked") throw new ApiError(400, "Ce lien a été annulé");
+    if (consent !== true) throw new ApiError(400, "Cochez la case d'accord pour continuer");
+    const samples = this.checkSamples(descriptors);
+    this.db.photoPasses.update(pass.id, { guests: pass.guests.map((g) => (g.id === guest.id ? { ...g, status: "active", descriptors: samples, consentAt: this.iso() } : g)), updatedAt: this.iso() });
+    this.notify(pass.userId, `${guest.name} a accepté`, `Ses photos de l'événement apparaissent maintenant dans Mes photos.`, `/photos?event=${pass.eventId}`);
+    return { ok: true };
+  }
+
+  /** Refuser ou retirer son accord : le visage est effacé tout de suite. */
+  declinePhotoGuest(code: string) {
+    const { pass, guest } = this.guestByCode(code);
+    this.db.photoPasses.update(pass.id, { guests: pass.guests.map((g) => (g.id === guest.id ? { ...g, status: "revoked", descriptors: [] } : g)), updatedAt: this.iso() });
+    if (guest.status !== "revoked") this.notify(pass.userId, `${guest.name} a refusé`, "Son visage n'est pas utilisé. Vous pouvez inviter quelqu'un d'autre.", `/photos?event=${pass.eventId}`);
+    return { ok: true };
+  }
+
+  removePhotoGuest(userId: string, idOrSlug: string, guestId: string) {
+    const user = this.requireUser(userId);
+    const e = this.findEvent(idOrSlug);
+    const pass = this.photoPass(user.id, e.id);
+    if (!pass || !pass.guests.some((g) => g.id === guestId)) throw new ApiError(404, "Visage introuvable");
+    this.db.photoPasses.update(pass.id, { guests: pass.guests.map((g) => (g.id === guestId ? { ...g, status: "revoked", descriptors: [] } : g)), updatedAt: this.iso() });
+    return { ok: true };
   }
 
   // =====================================================================

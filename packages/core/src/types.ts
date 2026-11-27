@@ -39,6 +39,8 @@ export interface User {
   faceConsentVersion?: string | null;
   /** Dernière utilisation de l'empreinte : supprimée après 12 mois sans usage. */
   faceUsedAt?: string | null;
+  /** Dernière recherche par selfie (sans enregistrer le visage) : photos trouvées, valables 24 h pour les télécharger. */
+  selfieMatches?: { ids: string[]; at: string } | null;
   neverShow: boolean;
   avatar?: string | null;
   googleId?: string | null;
@@ -96,10 +98,41 @@ export type PayoutNetwork = "moov" | "togocel" | "mixx";
 export type IntentAction =
   | { kind: "ticket"; eventId: string; ticketTypeId: string; qty: number; code?: string | null; group?: string | null }
   | { kind: "resale"; resaleId: string }
+  | { kind: "photos"; eventId: string; tier: PhotoTier }
   | { kind: "vote"; contestId: string; candidateId: string; pack: string }
   | { kind: "contribution"; cagnotteId: string; amount: number; message?: string; anonymous?: boolean; name?: string; code?: string | null }
   | { kind: "boost"; eventId: string; plan: string }
   | { kind: "subscription"; plan: "premium" | "pro" };
+
+/** Formules photos d'un événement : free (3 photos avec logo), plus (toutes avec logo), clean (sans logo), hd (Full HD + 3 visages). */
+export type PhotoTier = "free" | "plus" | "clean" | "hd";
+
+/** Visage d'un proche ajouté avec la formule Full HD (accord donné par la personne, ou par le parent pour un enfant). */
+export interface PhotoGuest {
+  id: string;
+  name: string;
+  kind: "adult" | "child";
+  /** Lien d'accord envoyé à la personne. */
+  code: string;
+  status: "pending" | "active" | "revoked";
+  descriptors: number[][];
+  consentAt: string | null;
+  createdAt: string;
+}
+
+export interface PhotoPass {
+  id: string;
+  userId: string;
+  eventId: string;
+  tier: PhotoTier;
+  /** Total payé pour cet événement (on ne paie que la différence pour monter de formule). */
+  paid: number;
+  /** Formule gratuite : les 3 photos choisies. */
+  picks: string[];
+  guests: PhotoGuest[];
+  createdAt: string;
+  updatedAt: string;
+}
 
 /** Cotisation : un groupe réserve N places, chacun paie la sienne et reçoit son propre billet. */
 export interface TicketGroup {
@@ -345,7 +378,12 @@ export interface Contribution {
 export interface Photo {
   id: string;
   eventId: string;
+  /** Aperçu public (petit, filigrane ToBe bien visible). Pour les anciennes photos : l'image d'origine. */
   url: string;
+  /** Versions réservées, données seulement selon la formule photo achetée (adresses non devinables). */
+  logoUrl?: string | null;
+  cleanUrl?: string | null;
+  hdUrl?: string | null;
   width: number;
   height: number;
   faces: number[][]; // descripteurs de visages (128 valeurs chacun)
@@ -400,7 +438,7 @@ export interface TobeRequest {
 export interface Payment {
   id: string;
   userId: string;
-  kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro";
+  kind: "ticket" | "vote" | "contribution" | "boost" | "premium" | "pro" | "photos";
   refId: string;
   eventId: string | null;
   amount: number; // payé par le client

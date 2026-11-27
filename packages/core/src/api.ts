@@ -105,6 +105,13 @@ export const routes: Route[] = [
   // Photos
   { method: "POST", path: "/photos/match", handler: (s, c) => s.matchSelfie(c.userId, c.body?.descriptors ?? c.body?.descriptor, c.body?.eventId) },
   { method: "DELETE", path: "/photos/:id", handler: (s, c) => s.removePhoto(need(c), c.params.id) },
+  { method: "POST", path: "/photos/:id/download", handler: (s, c) => s.downloadPhoto(need(c), c.params.id) },
+  { method: "POST", path: "/events/:id/photo-pass", handler: (s, c) => s.buyPhotoPass(need(c), c.params.id, c.body?.tier, c.body?.method ?? "online") },
+  { method: "POST", path: "/events/:id/photo-guests", handler: (s, c) => s.addPhotoGuest(need(c), c.params.id, c.body) },
+  { method: "DELETE", path: "/events/:id/photo-guests/:guestId", handler: (s, c) => s.removePhotoGuest(need(c), c.params.id, c.params.guestId) },
+  { method: "GET", path: "/photo-guests/:code", handler: (s, c) => s.photoGuestInvite(c.params.code) },
+  { method: "POST", path: "/photo-guests/:code/accept", handler: (s, c) => s.acceptPhotoGuest(c.params.code, c.body?.descriptors, c.body?.consent) },
+  { method: "POST", path: "/photo-guests/:code/decline", handler: (s, c) => s.declinePhotoGuest(c.params.code) },
 
   // ToBe Club
   { method: "GET", path: "/game", handler: (s, c) => s.game.state(c.userId) },

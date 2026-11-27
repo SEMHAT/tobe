@@ -192,3 +192,68 @@ test("visage : consentement obligatoire, empreintes effacées après les durées
   assert.deepEqual(t.svc.purgeFaceData(), { accounts: 1, photos: 0 });
   assert.equal(t.db.users.get(fan.user.id)!.faceDescriptor, null);
 });
+
+test("photos : 3 offertes avec logo, puis formules 250 / 500 / 1000 (on paie la différence), 70 % organisateur", async () => {
+  const t = setup();
+  t.db.users.update(t.orga.user.id, { trusted: true });
+  const fan = t.login("fan@exemple.tg", "Fan");
+  const face = Array.from({ length: 128 }, (_, i) => Math.sin(i) / 4);
+  t.svc.setFace(fan.user.id, face, true);
+  const v = (n: number) => ({ url: `https://b/apercu-${n}.jpg`, logoUrl: `https://b/logo-${n}.jpg`, cleanUrl: `https://b/net-${n}.jpg`, hdUrl: `https://b/hd-${n}.jpg`, width: 10, height: 10, faces: [face] });
+  t.svc.addPhotos(t.orga.user.id, t.ev.id, [1, 2, 3, 4, 5].map(v));
+  // La galerie publique ne montre que l'aperçu.
+  const pub = t.svc.listPhotos(t.ev.id, null) as unknown as Record<string, unknown>[];
+  assert.ok(pub.every((p) => !("cleanUrl" in p) && !("hdUrl" in p) && !("logoUrl" in p)));
+  const [g] = t.svc.myPhotos(fan.user.id);
+  assert.equal(g.tier, "free");
+  assert.equal(g.freeLeft, 3);
+  const ids = g.photos.map((p) => p.id);
+  for (const id of ids.slice(0, 3)) assert.match(t.svc.downloadPhoto(fan.user.id, id).url, /logo-/);
+  assert.match(t.svc.downloadPhoto(fan.user.id, ids[0]).url, /logo-/, "une photo déjà choisie reste gratuite");
+  assert.throws(() => t.svc.downloadPhoto(fan.user.id, ids[3]), /250/);
+  // Un inconnu ne peut rien télécharger.
+  const x = t.login("x@exemple.tg", "X");
+  assert.throws(() => t.svc.downloadPhoto(x.user.id, ids[0]), /n'apparaissez pas/);
+  // 250 F : toutes, avec logo.
+  const fanTok = fan.token;
+  await t.buy(`/events/${t.ev.id}/photo-pass`, fanTok, { tier: "plus" });
+  assert.match(t.svc.downloadPhoto(fan.user.id, ids[4]).url, /logo-/);
+  // Monter à 1000 F : on ne paie que 750.
+  const intent = await t.buy(`/events/${t.ev.id}/photo-pass`, fanTok, { tier: "hd" });
+  assert.equal(intent.amount, 750);
+  assert.match(t.svc.downloadPhoto(fan.user.id, ids[4]).url, /hd-/);
+  assert.equal((await t.call("POST", `/events/${t.ev.id}/photo-pass`, fanTok, { tier: "clean" })).status, 400);
+  // 70 % pour l'organisateur.
+  const share = t.db.payments.filter((p) => p.kind === "photos").reduce((n, p) => n + (p.organizerShare ?? 0), 0);
+  assert.equal(share, 175 + 525);
+});
+
+test("pack Full HD : 3 proches, avec leur accord (lien) ou celui du parent (enfant)", async () => {
+  const t = setup();
+  const fan = t.login("fan@exemple.tg", "Fan");
+  const me = Array.from({ length: 128 }, (_, i) => Math.sin(i) / 4);
+  const ami = Array.from({ length: 128 }, (_, i) => Math.cos(i * 1.7) / 4);
+  const enfant = Array.from({ length: 128 }, (_, i) => Math.sin(i * 3.1 + 1) / 4);
+  t.svc.setFace(fan.user.id, me, true);
+  t.svc.addPhotos(t.orga.user.id, t.ev.id, [
+    { url: "https://b/a.jpg", logoUrl: "https://b/la.jpg", cleanUrl: "https://b/ca.jpg", hdUrl: "https://b/ha.jpg", width: 1, height: 1, faces: [ami] },
+    { url: "https://b/b.jpg", logoUrl: "https://b/lb.jpg", cleanUrl: "https://b/cb.jpg", hdUrl: "https://b/hb.jpg", width: 1, height: 1, faces: [enfant] },
+  ]);
+  assert.throws(() => t.svc.addPhotoGuest(fan.user.id, t.ev.id, { name: "Kofi", kind: "adult" }), /Full HD/);
+  await t.buy(`/events/${t.ev.id}/photo-pass`, fan.token, { tier: "hd" });
+  assert.throws(() => t.svc.addPhotoGuest(fan.user.id, t.ev.id, { name: "Ama", kind: "child", descriptors: [enfant] }), /parent/);
+  t.svc.addPhotoGuest(fan.user.id, t.ev.id, { name: "Ama", kind: "child", descriptors: [enfant], attest: true });
+  const inv = t.svc.addPhotoGuest(fan.user.id, t.ev.id, { name: "Kofi", kind: "adult" });
+  assert.equal(inv.status, "pending");
+  // Tant que Kofi n'a pas accepté, ses photos n'apparaissent pas.
+  assert.deepEqual(t.svc.myPhotos(fan.user.id)[0].photos.map((p) => p.guest), ["Ama"]);
+  assert.throws(() => t.svc.acceptPhotoGuest(inv.code, [ami], false), /accord/);
+  t.svc.acceptPhotoGuest(inv.code, [ami], true);
+  const g = t.svc.myPhotos(fan.user.id)[0];
+  assert.deepEqual(g.photos.map((p) => p.guest).sort(), ["Ama", "Kofi"]);
+  assert.match(t.svc.downloadPhoto(fan.user.id, g.photos[0].id).url, /h[ab]\.jpg/);
+  // Kofi retire son accord : visage effacé.
+  t.svc.declinePhotoGuest(inv.code);
+  assert.deepEqual(t.svc.myPhotos(fan.user.id)[0].photos.map((p) => p.guest), ["Ama"]);
+  assert.equal(t.db.photoPasses.all()[0].guests.find((x) => x.name === "Kofi")!.descriptors.length, 0);
+});

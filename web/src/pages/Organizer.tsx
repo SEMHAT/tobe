@@ -39,7 +39,7 @@ import { api, HttpError, uploadImage } from "../lib/api";
 import { downloadManifest, loadManifest, markScanned, pendingScans, scanLocally, syncScans } from "../lib/offlineScan";
 import { faceDescriptors, loadFaceApi } from "../lib/face";
 import { compact, formatFcfa, shareUrl, shortDate, whatsappLink } from "../lib/format";
-import { resizeImage } from "../lib/media";
+import { photoVariants } from "../lib/media";
 import { useSession } from "../lib/session";
 import { useLoad } from "../lib/useLoad";
 
@@ -504,17 +504,18 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
     setStage("Préparation de la reconnaissance faciale…");
     try {
       await loadFaceApi();
-      const batch: { url: string; width: number; height: number; faces: number[][] }[] = [];
+      const batch: { url: string; logoUrl: string; cleanUrl: string; hdUrl: string; width: number; height: number; faces: number[][] }[] = [];
       let faces = 0;
       let added = 0;
       let notified = 0;
       for (let i = 0; i < list.length; i++) {
         setStage(`Analyse des visages et envoi (${i + 1}/${list.length})…`);
-        const { blob, width, height, canvas } = await resizeImage(list[i], 1600, 0.86);
-        const desc = await faceDescriptors(canvas);
+        // 4 versions : aperçu public filigrané, avec logo, sans logo, Full HD (selon la formule du participant).
+        const v = await photoVariants(list[i]);
+        const desc = await faceDescriptors(v.canvas);
         faces += desc.length;
-        const url = await uploadImage(blob, list[i].name);
-        batch.push({ url, width, height, faces: desc });
+        const [url, logoUrl, cleanUrl, hdUrl] = await Promise.all([uploadImage(v.preview), uploadImage(v.logo), uploadImage(v.clean), uploadImage(v.hd)]);
+        batch.push({ url, logoUrl, cleanUrl, hdUrl, width: v.width, height: v.height, faces: desc });
         setProgress({ done: i + 1, total: list.length, faces });
         if (batch.length === 10 || i === list.length - 1) {
           const r = await api<{ added: number; notified: number }>("POST", `/events/${eventId}/photos`, { photos: batch.splice(0) });
@@ -534,7 +535,7 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
   return (
     <Sheet open={open} onClose={() => !progress && onClose()} title="Déposer les photos">
       <div className="space-y-4">
-        <p className="text-sm text-muted">Les visages sont détectés sur votre appareil. Chaque participant qui a activé son Pass ToBe est prévenu automatiquement.</p>
+        <p className="text-sm text-muted">Les visages sont détectés sur votre appareil. Chaque participant reconnu est prévenu : {PRICING.photoFreeCount} photos offertes, puis il débloque les siennes dès {formatFcfa(PRICING.photoPrices.plus)}. <b className="text-ink">{Math.round((1 - PRICING.photoCommission) * 100)} % des ventes de photos sont pour vous.</b></p>
         {!progress && (
           <label className="flex h-36 cursor-pointer flex-col items-center justify-center gap-2 rounded-[22px] border-2 border-dashed border-brand/40 bg-brand/5 text-center">
             <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => run(e.target.files)} />

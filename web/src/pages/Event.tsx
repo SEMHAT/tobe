@@ -1,3 +1,4 @@
+import { PRICING } from "@tobe/core";
 import type { EventView } from "@tobe/core";
 import { Ban,
   BadgeCheck,
@@ -518,7 +519,12 @@ function PhotosTab({ e, code }: { e: EventView; code: string }) {
     <div>
       <Link to={`/photos?event=${e.id}`} className="mb-4 flex items-center gap-3 rounded-2xl border border-brand/40 bg-brand/10 p-3.5">
         <Camera className="size-5 text-brand" />
-        <span className="flex-1 text-sm font-semibold">Me retrouver sur ces photos avec mon visage</span>
+        <span className="flex-1 text-sm font-semibold">
+          Me retrouver sur ces photos avec mon visage
+          <span className="block text-xs font-normal text-muted">
+            {PRICING.photoFreeCount} photos offertes · toutes dès {formatFcfa(PRICING.photoPrices.plus)}
+          </span>
+        </span>
         <ChevronRight className="size-5 text-brand" />
       </Link>
       {!data && <div className="skeleton h-40 rounded-2xl" />}

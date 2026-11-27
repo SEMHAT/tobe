@@ -15,6 +15,11 @@ export const PRICING = {
   withdrawMin: 500,
   /** Revente officielle : ToBe garde 5 % (le vendeur reçoit le reste). */
   resaleCommission: 0.05,
+  /** Formules photos par événement (FCFA) et part de ToBe (le reste va à l'organisateur). */
+  photoPrices: { free: 0, plus: 250, clean: 500, hd: 1000 } as Record<"free" | "plus" | "clean" | "hd", number>,
+  photoFreeCount: 3,
+  photoGuestsMax: 3,
+  photoCommission: 0.3,
   premiumMonthly: 1000, // Pass ToBe Premium
   proMonthly: 15000, // abonnement Organisateur Pro
   boosts: {
