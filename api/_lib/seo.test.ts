@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
+import { agencyMeta, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
 import { urlsAfter } from "./indexnow.js";
 
 const TEMPLATE = `<!doctype html><html lang="fr"><head>
@@ -180,4 +180,13 @@ test("IndexNow : seulement après une action sur un événement", () => {
   assert.deepEqual(urlsAfter("POST", "/me/face", {}), []);
   assert.ok(urlsAfter("POST", "/events", { slug: "fete" }).includes("https://tobe.eledji.com/evenement/fete"));
   assert.ok(urlsAfter("POST", "/admin/events/e1/moderation", {}).includes("https://tobe.eledji.com/explorer"));
+});
+
+test("page agence : canonique, description courte, données Service", () => {
+  const a = agencyMeta();
+  assert.equal(a.canonical, "https://tobe.eledji.com/organiser");
+  assert.ok(a.description.length <= 160);
+  assert.ok(a.title.length <= 60);
+  assert.ok(a.body.includes("<h1>"));
+  assert.equal((a.jsonLd[0] as { "@type": string })["@type"], "Service");
 });

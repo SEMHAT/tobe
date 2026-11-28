@@ -33,6 +33,7 @@ const GroupPage = lazy(() => import("./pages/Group").then((m) => ({ default: m.G
 const Observatory = lazy(() => import("./pages/Observatory").then((m) => ({ default: m.Observatory })));
 const Privacy = lazy(() => import("./pages/Privacy").then((m) => ({ default: m.Privacy })));
 const GuestConsent = lazy(() => import("./pages/GuestConsent").then((m) => ({ default: m.GuestConsent })));
+const Agency = lazy(() => import("./pages/Agency").then((m) => ({ default: m.Agency })));
 const Onboarding = lazy(() => import("./pages/Onboarding").then((m) => ({ default: m.Onboarding })));
 
 function HomeGate() {
@@ -72,6 +73,7 @@ export function App() {
           <Route path="/visage/:code" element={<GuestConsent />} />
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/prestataires" element={<Providers />} />
+          <Route path="/organiser" element={<Agency />} />
           <Route path="/tobe" element={<TobeAdmin />} />
           <Route path="/club" element={<Club />} />
           <Route path="/invitation/:token" element={<Invitation />} />

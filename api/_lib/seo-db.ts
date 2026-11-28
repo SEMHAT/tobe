@@ -1,5 +1,5 @@
 // Lectures en base pour le référencement (aucune écriture). Le pool est injecté : testable avec PGlite.
-import { SITE, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isListed, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
+import { SITE, agencyMeta, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isListed, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
 import { ensureSchema, type PgPool } from "./store.js";
 
 export function seoQueries(pool: PgPool) {
@@ -36,6 +36,7 @@ export function seoQueries(pool: PgPool) {
     if (parts.length === 1 && parts[0] === "explorer") return explorerMeta(await upcoming());
     if (parts.length === 1 && (parts[0] === "observatoire" || parts[0] === "securite" || parts[0] === "confidentialite")) return infoMeta(parts[0]);
     if (parts.length === 1 && parts[0] === "prestataires") return providersMeta();
+    if (parts.length === 1 && parts[0] === "organiser") return agencyMeta();
     if (parts.length === 2 && parts[0] === "evenement") {
       const e = await one<SeoEvent>("events", parts[1], true);
       return e ? eventMeta(e) : notFoundMeta();
@@ -63,6 +64,7 @@ export function seoQueries(pool: PgPool) {
       { loc: `${SITE}/`, lastmod: latest },
       { loc: `${SITE}/explorer`, lastmod: latest },
       { loc: `${SITE}/prestataires` },
+      { loc: `${SITE}/organiser` },
       { loc: `${SITE}/observatoire`, lastmod: latest },
       { loc: `${SITE}/securite` },
       { loc: `${SITE}/confidentialite` },
