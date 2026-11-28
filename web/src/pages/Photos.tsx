@@ -209,6 +209,8 @@ const ENROLL_STEPS: Step[] = [
   { key: "face", label: "De face", hint: "Regardez droit devant vous" },
   { key: "side1", label: "Profil", hint: "Tournez lentement la tête d'un côté" },
   { key: "side2", label: "Autre profil", hint: "Puis lentement de l'autre côté" },
+  // Pour les photos prises tête baissée (on regarde son verre, son téléphone, la piste…).
+  { key: "down", label: "Tête baissée", hint: "Baissez légèrement la tête, les yeux vers le bas" },
 ];
 const ONCE_STEPS: Step[] = [ENROLL_STEPS[0]];
 
@@ -230,6 +232,7 @@ export function CameraSheet({ open, onClose, onDescriptors, title, mode }: { ope
   const [slow, setSlow] = useState(false);
   const samples = useRef<number[][]>([]);
   const firstSide = useRef(0);
+  const frontPitch = useRef(0);
   const running = useRef(false);
   const steps = mode === "enroll" ? ENROLL_STEPS : ONCE_STEPS;
 
@@ -304,6 +307,10 @@ export function CameraSheet({ open, onClose, onDescriptors, title, mode }: { ope
           } else if (key === "side1") {
             ok = Math.abs(a.yaw) > 0.2 && Math.abs(a.yaw) < 0.6;
             if (!ok) tip = Math.abs(a.yaw) >= 0.6 ? "Un peu moins tourné" : "Tournez doucement la tête d'un côté";
+          } else if (key === "down") {
+            const ref = frontPitch.current || a.pitch;
+            ok = Math.abs(a.yaw) < 0.25 && a.pitch < ref * 0.8 && a.pitch > ref * 0.35;
+            if (!ok) tip = a.pitch <= ref * 0.35 ? "Un peu moins baissée" : "Baissez légèrement la tête";
           } else if (key === "side2") {
             ok = Math.abs(a.yaw) > 0.2 && Math.abs(a.yaw) < 0.6 && Math.sign(a.yaw) !== firstSide.current;
             if (!ok) tip = Math.abs(a.yaw) >= 0.6 ? "Un peu moins tourné" : "Maintenant, de l'autre côté";
@@ -317,6 +324,7 @@ export function CameraSheet({ open, onClose, onDescriptors, title, mode }: { ope
           const d = await captureDescriptor(v).catch(() => null);
           if (d && running.current) {
             if (key === "side1") firstSide.current = Math.sign(a.yaw) || 1;
+            if (key === "face") frontPitch.current = a.pitch;
             samples.current = [...samples.current, d];
             current = samples.current.length;
             stable = 0;

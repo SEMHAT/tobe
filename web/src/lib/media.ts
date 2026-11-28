@@ -126,5 +126,5 @@ export async function photoVariants(file: Blob) {
   const prevC = scaled(hdC, 720);
   previewWatermark(prevC);
   const [hd, clean, logo, preview] = await Promise.all([toJpeg(hdC, 0.9), toJpeg(cleanC, 0.86), toJpeg(logoC, 0.86), toJpeg(prevC, 0.72)]);
-  return { hd, clean, logo, preview, width: hdC.width, height: hdC.height, canvas: cleanC };
+  return { hd, clean, logo, preview, width: hdC.width, height: hdC.height, canvas: hdC };
 }

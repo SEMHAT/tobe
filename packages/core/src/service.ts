@@ -52,7 +52,25 @@ import type {
 
 import { ApiError } from "./errors.js";
 import { checkDynamicQr, parseQr } from "./qr.js";
+import { matchEventFaces, type EventMatch, type FaceMeta, type MatchVia } from "./faceMatch.js";
 import { CATEGORY_LABELS } from "./rules.js";
+
+/** Visages et signatures de tenue reçus du téléphone de l'organisateur : on garde ce qui est bien formé. */
+function cleanFaces(faces: unknown, meta: unknown) {
+  const list = Array.isArray(faces) ? faces : [];
+  const m = Array.isArray(meta) ? meta : [];
+  const keep: number[][] = [];
+  const keepMeta: FaceMeta[] = [];
+  list.forEach((f, i) => {
+    if (!isDescriptor(f)) return;
+    keep.push(f);
+    const x = m[i] as FaceMeta | undefined;
+    const box = Array.isArray(x?.box) && x.box.length === 4 && x.box.every((n) => typeof n === "number" && n >= -0.1 && n <= 1.1) ? x.box : null;
+    const outfit = Array.isArray(x?.outfit) && x.outfit.length <= 32 && x.outfit.every((n) => typeof n === "number" && n >= 0 && n <= 1) ? x.outfit : [];
+    keepMeta.push({ box: box ?? [0, 0, 0, 0], outfit });
+  });
+  return { faces: keep, faceMeta: m.length ? keepMeta : null };
+}
 
 /** Version du texte de consentement au Pass ToBe (visage). */
 export const FACE_CONSENT_VERSION = "2026-11";
@@ -2052,12 +2070,12 @@ export class ToBeService {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  addPhotos(userId: string, idOrSlug: string, photos: { url: string; logoUrl?: string | null; cleanUrl?: string | null; hdUrl?: string | null; width: number; height: number; faces: number[][] }[]) {
+  addPhotos(userId: string, idOrSlug: string, photos: { url: string; logoUrl?: string | null; cleanUrl?: string | null; hdUrl?: string | null; width: number; height: number; faces: number[][]; faceMeta?: FaceMeta[] | null }[]) {
     const user = this.requireUser(userId);
     const e = this.findEvent(idOrSlug);
     if (!this.team.access(e, user).photos) throw new ApiError(403, "Seuls l'organisateur et ses photographes peuvent déposer des photos");
     const added: Photo[] = photos.map((p) =>
-      this.db.photos.insert({ id: newId("pho"), eventId: e.id, url: p.url, logoUrl: p.logoUrl ?? null, cleanUrl: p.cleanUrl ?? null, hdUrl: p.hdUrl ?? null, width: p.width, height: p.height, faces: (p.faces ?? []).filter((f) => Array.isArray(f) && f.length === 128), uploadedBy: user.id, createdAt: this.iso() }),
+      this.db.photos.insert({ id: newId("pho"), eventId: e.id, url: p.url, logoUrl: p.logoUrl ?? null, cleanUrl: p.cleanUrl ?? null, hdUrl: p.hdUrl ?? null, width: p.width, height: p.height, ...cleanFaces(p.faces, p.faceMeta), uploadedBy: user.id, createdAt: this.iso() }),
     );
     if (!e.options.gallery) this.db.events.update(e.id, { options: { ...e.options, gallery: true } });
     // Pass ToBe : on prévient automatiquement chaque personne reconnue.
@@ -2067,7 +2085,7 @@ export class ToBeService {
       const mine = userFaces(u);
       const n = added.filter((p) => facesMatch(mine, p.faces)).length;
       if (n > 0) {
-        const total = this.db.photos.filter((p) => p.eventId === e.id && facesMatch(mine, p.faces)).length;
+        const total = this.eventMatch(u, e.id).mine.size;
         this.notify(u.id, `Vous êtes sur ${total} photo${total > 1 ? "s" : ""} de ${e.title}`, `Retrouvez-les dans Mes photos : ${PRICING.photoFreeCount} offertes, toutes dès ${PRICING.photoPrices.plus} F.`, `/photos?event=${e.id}`);
         notified.push(u.id);
       }
@@ -2095,10 +2113,10 @@ export class ToBeService {
     if (consent !== true && consent !== FACE_CONSENT_VERSION) throw new ApiError(400, "Cochez la case d'accord pour activer la reconnaissance de votre visage");
     const samples = (Array.isArray(input?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
     if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
-    for (let i = 0; i < samples.length; i++)
-      for (let j = i + 1; j < samples.length; j++)
-        if (faceDistance(samples[i], samples[j]) > FACE_CONSISTENCY_MAX)
-          throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez, seul face à la caméra.");
+    // Chaque capture (profils, tête baissée) est comparée à celle de face : même personne du début à la fin.
+    for (let i = 1; i < samples.length; i++)
+      if (faceDistance(samples[0], samples[i]) > FACE_CONSISTENCY_MAX)
+        throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez, seul face à la caméra.");
     const u = this.db.users.update(user.id, { faceDescriptor: meanDescriptor(samples), faceDescriptors: samples, passEnabled: true, neverShow: false, faceConsentAt: this.iso(), faceConsentVersion: FACE_CONSENT_VERSION, faceUsedAt: this.iso() });
     return { user: this.publicUser(u), groups: this.myPhotos(u.id) };
   }
@@ -2159,22 +2177,86 @@ export class ToBeService {
     if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu");
     const groups = this.matchPhotos(samples, user, eventId);
     // Connecté : ces photos pourront être débloquées pendant 24 h sans enregistrer le visage.
-    if (user) this.db.users.update(user.id, { selfieMatches: { ids: groups.flatMap((g) => g.photos.map((p) => p.id)).slice(0, 500), at: this.iso() } });
+    if (user) this.db.users.update(user.id, { selfieMatches: { ids: groups.flatMap((g) => g.photos.map((p) => p.id)).slice(0, 500), at: this.iso() }, selfieSamples: samples });
     return user ? this.decorate(groups, this.db.users.get(user.id)!) : groups;
   }
 
+  /** Réponses « C'est moi / Pas moi » de l'utilisateur pour un événement. */
+  private claimSets(userId: string | null, eventPhotos: Set<string>) {
+    const confirmed = new Set<string>();
+    const rejected = new Set<string>();
+    if (userId)
+      for (const c of this.db.photoClaims.filter((x) => x.userId === userId && eventPhotos.has(x.photoId))) (c.ok ? confirmed : rejected).add(`${c.photoId}:${c.face}`);
+    return { confirmed, rejected };
+  }
+
+  /** « Retrouve-moi » sur un événement : visage, look de la soirée, tenue (voir faceMatch.ts). */
+  private eventMatch(user: User | null, eventId: string, samples?: number[][]) {
+    const photos = this.db.photos.filter((p) => p.eventId === eventId);
+    const s = samples ?? (user ? userFaces(user) : []);
+    const { confirmed, rejected } = this.claimSets(user?.id ?? null, new Set(photos.map((p) => p.id)));
+    if (!s.length && !confirmed.size) return { mine: new Map(), suggestions: [] } as EventMatch;
+    return matchEventFaces({ samples: s, photos, confirmed, rejected });
+  }
+
   private matchPhotos(mine: number[][], user: User | null, eventId?: string) {
-    const groups = new Map<string, { event: EventCard; photos: (Pick<Photo, "id" | "eventId" | "url" | "width" | "height" | "uploadedBy" | "createdAt"> & { distance: number; guest?: string })[] }>();
-    for (const p of this.db.photos.all()) {
-      if (eventId && p.eventId !== eventId) continue;
-      const d = facesDistance(mine, p.faces);
-      if (d >= FACE_MATCH_THRESHOLD) continue;
-      const e = this.db.events.get(p.eventId);
+    type Item = Pick<Photo, "id" | "eventId" | "url" | "width" | "height" | "uploadedBy" | "createdAt"> & { distance: number; via?: MatchVia; guest?: string };
+    const groups: { event: EventCard; photos: Item[]; suggestions: { photoId: string; face: number; url: string; width: number; height: number; box: FaceMeta["box"] | null; outfit: number | null }[] }[] = [];
+    const eventIds = new Set(this.db.photos.all().map((p) => p.eventId));
+    for (const id of eventIds) {
+      if (eventId && id !== eventId) continue;
+      const e = this.db.events.get(id);
       if (!e || !this.canView(e, user)) continue;
-      if (!groups.has(e.id)) groups.set(e.id, { event: this.toCard(e), photos: [] });
-      groups.get(e.id)!.photos.push({ id: p.id, eventId: p.eventId, url: p.url, width: p.width, height: p.height, uploadedBy: p.uploadedBy, createdAt: p.createdAt, distance: Math.round(d * 1000) / 1000 });
+      const m = this.eventMatch(user, id, mine);
+      if (!m.mine.size && !m.suggestions.length) continue;
+      const photos: Item[] = [];
+      for (const [pid, r] of m.mine) {
+        const p = this.db.photos.get(pid)!;
+        photos.push({ id: p.id, eventId: p.eventId, url: p.url, width: p.width, height: p.height, uploadedBy: p.uploadedBy, createdAt: p.createdAt, distance: r.distance, via: r.via });
+      }
+      photos.sort((a, b) => a.distance - b.distance);
+      const suggestions = user
+        ? m.suggestions.map((sg) => {
+            const p = this.db.photos.get(sg.photoId)!;
+            return { photoId: p.id, face: sg.face, url: p.url, width: p.width, height: p.height, box: sg.box, outfit: sg.outfit };
+          })
+        : [];
+      groups.push({ event: this.toCard(e), photos, suggestions });
     }
-    return [...groups.values()].sort((a, b) => b.event.startsAt.localeCompare(a.event.startsAt));
+    return groups.filter((g) => g.photos.length || g.suggestions.length).sort((a, b) => b.event.startsAt.localeCompare(a.event.startsAt));
+  }
+
+  /**
+   * « C'est moi » / « Pas moi » sur une suggestion. Confirmer ajoute la photo, et le Pass apprend :
+   * ce visage (tête baissée, profil, autre lumière) rejoint les empreintes de la personne.
+   */
+  claimPhoto(userId: string, photoId: string, face: number, ok: boolean) {
+    const user = this.requireUser(userId);
+    const p = this.db.photos.get(photoId);
+    if (!p || !p.faces[face]) throw new ApiError(404, "Photo introuvable");
+    const e = this.db.events.get(p.eventId);
+    if (!e || !this.canView(e, user)) throw new ApiError(404, "Photo introuvable");
+    if (ok) {
+      const m = this.eventMatch(user, e.id, this.searchSamples(user));
+      if (!m.suggestions.some((s) => s.photoId === p.id && s.face === face)) throw new ApiError(400, "Cette photo ne vous est pas proposée");
+    }
+    for (const c of this.db.photoClaims.filter((x) => x.userId === user.id && x.photoId === p.id && x.face === face)) this.db.photoClaims.remove(c.id);
+    this.db.photoClaims.insert({ id: newId("clm"), userId: user.id, photoId: p.id, face, ok: !!ok, createdAt: this.iso() });
+    if (ok && user.faceDescriptors?.length) {
+      const learned = p.faces[face];
+      const mean = meanDescriptor(user.faceDescriptors);
+      // On n'apprend que si ce visage reste cohérent avec la personne.
+      if (faceDistance(mean, learned) < 0.7) {
+        const kept = [...user.faceDescriptors.slice(0, 4), ...user.faceDescriptors.slice(4).slice(-6), learned];
+        this.db.users.update(user.id, { faceDescriptors: kept, faceDescriptor: meanDescriptor(kept) });
+      }
+    }
+    return { ok: true };
+  }
+
+  /** Empreintes à utiliser pour chercher : le Pass, ou la dernière recherche par selfie. */
+  private searchSamples(user: User) {
+    return userFaces(user).length ? userFaces(user) : (user.selfieSamples ?? []);
   }
 
   // =====================================================================
@@ -2195,12 +2277,11 @@ export class ToBeService {
 
   /** Les photos où l'utilisateur apparaît (son visage, sa dernière recherche par selfie, ou un proche ajouté). */
   private photoIsMine(user: User, p: Photo): string | true | false {
-    const mine = userFaces(user);
-    if (mine.length && facesMatch(mine, p.faces)) return true;
+    if (this.eventMatch(user, p.eventId).mine.has(p.id)) return true;
     const s = user.selfieMatches;
     if (s && this.now().getTime() - new Date(s.at).getTime() < 86400_000 && s.ids.includes(p.id)) return true;
     const pass = this.photoPass(user.id, p.eventId);
-    if (pass?.tier === "hd") for (const g of pass.guests) if (g.status === "active" && g.descriptors.length && facesMatch(g.descriptors, p.faces)) return g.name;
+    if (pass?.tier === "hd") for (const g of pass.guests) if (g.status === "active" && g.descriptors.length && this.eventMatch(null, p.eventId, g.descriptors).mine.has(p.id)) return g.name;
     return false;
   }
 
@@ -2211,12 +2292,13 @@ export class ToBeService {
       const e = this.db.events.get(pass.eventId);
       if (!e) continue;
       let g = groups.find((x) => x.event.id === e.id);
+      const guestHits = pass.guests.filter((gu) => gu.status === "active" && gu.descriptors.length).map((gu) => ({ name: gu.name, mine: this.eventMatch(null, e.id, gu.descriptors).mine }));
       for (const ph of this.db.photos.filter((x) => x.eventId === e.id)) {
         if (g?.photos.some((x) => x.id === ph.id)) continue;
-        const who = pass.guests.find((gu) => gu.status === "active" && gu.descriptors.length && facesMatch(gu.descriptors, ph.faces));
+        const who = guestHits.find((gu) => gu.mine.has(ph.id));
         if (!who) continue;
         if (!g) {
-          g = { event: this.toCard(e), photos: [] };
+          g = { event: this.toCard(e), photos: [], suggestions: [] };
           groups.push(g);
         }
         g.photos.push({ id: ph.id, eventId: ph.eventId, url: ph.url, width: ph.width, height: ph.height, uploadedBy: ph.uploadedBy, createdAt: ph.createdAt, distance: 0, guest: who.name });
@@ -2322,9 +2404,8 @@ export class ToBeService {
   private checkSamples(input: unknown) {
     const samples = (Array.isArray((input as number[][])?.[0]) ? (input as number[][]) : [input as number[]]).slice(0, 5);
     if (!samples.length || samples.some((d) => !isDescriptor(d))) throw new ApiError(400, "Visage non reconnu, réessayez avec plus de lumière");
-    for (let i = 0; i < samples.length; i++)
-      for (let j = i + 1; j < samples.length; j++)
-        if (faceDistance(samples[i], samples[j]) > FACE_CONSISTENCY_MAX) throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez.");
+    for (let i = 1; i < samples.length; i++)
+      if (faceDistance(samples[0], samples[i]) > FACE_CONSISTENCY_MAX) throw new ApiError(400, "Les captures ne semblent pas montrer la même personne. Recommencez.");
     return samples;
   }
 

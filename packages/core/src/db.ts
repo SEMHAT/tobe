@@ -12,6 +12,7 @@ import type {
   PaymentIntent,
   Payout,
   EventReport,
+  PhotoClaim,
   PhotoPass,
   Resale,
   TicketGroup,
@@ -125,6 +126,7 @@ export const COLLECTIONS = [
   "groups",
   "resales",
   "photoPasses",
+  "photoClaims",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
@@ -160,6 +162,7 @@ export interface Db {
   groups: Collection<TicketGroup>;
   resales: Collection<Resale>;
   photoPasses: Collection<PhotoPass>;
+  photoClaims: Collection<PhotoClaim>;
 }
 
 export type DbSnapshot = { [K in CollectionName]?: { id: string }[] };

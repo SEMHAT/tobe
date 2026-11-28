@@ -257,3 +257,56 @@ test("pack Full HD : 3 proches, avec leur accord (lien) ou celui du parent (enfa
   assert.deepEqual(t.svc.myPhotos(fan.user.id)[0].photos.map((p) => p.guest), ["Ama"]);
   assert.equal(t.db.photoPasses.all()[0].guests.find((x) => x.name === "Kofi")!.descriptors.length, 0);
 });
+
+// Vecteurs de test : une personne, puis le même visage abîmé (tête baissée, nuit…) à une distance choisie.
+function rnd(seed: number) {
+  let x = seed;
+  return () => ((x = (x * 16807) % 2147483647) / 2147483647) * 2 - 1;
+}
+function dir(seed: number) {
+  const r = rnd(seed);
+  const v = Array.from({ length: 128 }, () => r());
+  const n = Math.hypot(...v);
+  return v.map((x) => x / n);
+}
+const plus = (a: number[], d: number[], k: number) => a.map((x, i) => x + d[i] * k);
+
+test("Retrouve-moi : look de la soirée, tenue, « C'est moi » et apprentissage", () => {
+  const t = setup();
+  const fan = t.login("fan@exemple.tg", "Fan");
+  const me = dir(1).map((x) => x * 0.6);
+  const f1 = plus(me, dir(2), 0.42); // photo nette : reconnue (0,42)
+  const f2 = plus(f1, dir(3), 0.35); // tête baissée : loin du selfie (~0,55) mais proche du visage du soir
+  const f3 = plus(me, dir(4), 0.64); // de profil dans le noir : incertain, même tenue
+  const other = dir(9).map((x) => x * 0.6); // une autre personne, même tenue
+  const rouge = [0.6, 0.1, 0, 0, 0, 0, 0, 0, 0.2, 0.1, 0];
+  const bleu = [0, 0, 0, 0, 0.7, 0.2, 0, 0, 0.1, 0, 0];
+  const meta = (o: number[]) => ({ box: [0.4, 0.2, 0.1, 0.12] as [number, number, number, number], outfit: o });
+  t.svc.setFace(fan.user.id, [me], true);
+  t.svc.addPhotos(t.orga.user.id, t.ev.id, [
+    { url: "https://b/1.jpg", logoUrl: "https://b/l1.jpg", width: 1, height: 1, faces: [f1], faceMeta: [meta(rouge)] },
+    { url: "https://b/2.jpg", logoUrl: "https://b/l2.jpg", width: 1, height: 1, faces: [f2], faceMeta: [meta(bleu)] },
+    { url: "https://b/3.jpg", logoUrl: "https://b/l3.jpg", width: 1, height: 1, faces: [f3], faceMeta: [meta(rouge)] },
+    { url: "https://b/4.jpg", logoUrl: "https://b/l4.jpg", width: 1, height: 1, faces: [other], faceMeta: [meta(rouge)] },
+  ]);
+  const [g] = t.svc.myPhotos(fan.user.id);
+  const byUrl = (u: string) => t.db.photos.find((p) => p.url === u)!.id;
+  assert.deepEqual(
+    g.photos.map((p) => [p.url, p.via]).sort(),
+    [
+      ["https://b/1.jpg", "visage"],
+      ["https://b/2.jpg", "soirée"],
+    ],
+  );
+  assert.deepEqual(g.suggestions.map((s) => s.url), ["https://b/3.jpg"], "même tenue + visage incertain = suggestion ; l'autre personne n'est pas proposée");
+  // Pas de téléchargement d'une simple suggestion.
+  assert.throws(() => t.svc.downloadPhoto(fan.user.id, byUrl("https://b/3.jpg")), /n'apparaissez pas/);
+  assert.throws(() => t.svc.claimPhoto(fan.user.id, byUrl("https://b/4.jpg"), 0, true), /pas proposée/);
+  t.svc.claimPhoto(fan.user.id, byUrl("https://b/3.jpg"), 0, true);
+  assert.match(t.svc.downloadPhoto(fan.user.id, byUrl("https://b/3.jpg")).url, /l3/);
+  assert.equal(t.db.users.get(fan.user.id)!.faceDescriptors!.length, 2, "le Pass a appris ce visage");
+  // « Pas moi » : la suggestion disparaît.
+  const [g2] = t.svc.myPhotos(fan.user.id);
+  assert.equal(g2.photos.length, 3);
+  assert.equal(g2.suggestions.length, 0);
+});

@@ -37,7 +37,7 @@ import { Button, Card, Empty, ErrorState, Field, PageLoader, Progress, Sheet, St
 import { Poster, TierBadge } from "../components/visual";
 import { api, HttpError, uploadImage } from "../lib/api";
 import { downloadManifest, loadManifest, markScanned, pendingScans, scanLocally, syncScans } from "../lib/offlineScan";
-import { faceDescriptors, loadFaceApi } from "../lib/face";
+import { detectFacesDeep, loadFaceApi, type FaceMeta } from "../lib/face";
 import { compact, formatFcfa, shareUrl, shortDate, whatsappLink } from "../lib/format";
 import { photoVariants } from "../lib/media";
 import { useSession } from "../lib/session";
@@ -504,7 +504,7 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
     setStage("Préparation de la reconnaissance faciale…");
     try {
       await loadFaceApi();
-      const batch: { url: string; logoUrl: string; cleanUrl: string; hdUrl: string; width: number; height: number; faces: number[][] }[] = [];
+      const batch: { url: string; logoUrl: string; cleanUrl: string; hdUrl: string; width: number; height: number; faces: number[][]; faceMeta: FaceMeta[] }[] = [];
       let faces = 0;
       let added = 0;
       let notified = 0;
@@ -512,10 +512,11 @@ function PhotoUploadSheet({ open, onClose, eventId, onDone }: { open: boolean; o
         setStage(`Analyse des visages et envoi (${i + 1}/${list.length})…`);
         // 4 versions : aperçu public filigrané, avec logo, sans logo, Full HD (selon la formule du participant).
         const v = await photoVariants(list[i]);
-        const desc = await faceDescriptors(v.canvas);
+        // Détection approfondie : foule, visages lointains, têtes penchées + signature de la tenue.
+        const { faces: desc, meta } = await detectFacesDeep(v.canvas);
         faces += desc.length;
         const [url, logoUrl, cleanUrl, hdUrl] = await Promise.all([uploadImage(v.preview), uploadImage(v.logo), uploadImage(v.clean), uploadImage(v.hd)]);
-        batch.push({ url, logoUrl, cleanUrl, hdUrl, width: v.width, height: v.height, faces: desc });
+        batch.push({ url, logoUrl, cleanUrl, hdUrl, width: v.width, height: v.height, faces: desc, faceMeta: meta });
         setProgress({ done: i + 1, total: list.length, faces });
         if (batch.length === 10 || i === list.length - 1) {
           const r = await api<{ added: number; notified: number }>("POST", `/events/${eventId}/photos`, { photos: batch.splice(0) });

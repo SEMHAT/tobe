@@ -41,6 +41,8 @@ export interface User {
   faceUsedAt?: string | null;
   /** Dernière recherche par selfie (sans enregistrer le visage) : photos trouvées, valables 24 h pour les télécharger. */
   selfieMatches?: { ids: string[]; at: string } | null;
+  /** Empreintes de la dernière recherche par selfie (24 h), pour répondre aux suggestions. */
+  selfieSamples?: number[][] | null;
   neverShow: boolean;
   avatar?: string | null;
   googleId?: string | null;
@@ -103,6 +105,19 @@ export type IntentAction =
   | { kind: "contribution"; cagnotteId: string; amount: number; message?: string; anonymous?: boolean; name?: string; code?: string | null }
   | { kind: "boost"; eventId: string; plan: string }
   | { kind: "subscription"; plan: "premium" | "pro" };
+
+export type { FaceMeta } from "./faceMatch.js";
+import type { FaceMeta } from "./faceMatch.js";
+
+/** Réponse d'une personne à une suggestion « Peut-être vous » (et apprentissage du visage). */
+export interface PhotoClaim {
+  id: string;
+  userId: string;
+  photoId: string;
+  face: number;
+  ok: boolean;
+  createdAt: string;
+}
 
 /** Formules photos d'un événement : free (3 photos avec logo), plus (toutes avec logo), clean (sans logo), hd (Full HD + 3 visages). */
 export type PhotoTier = "free" | "plus" | "clean" | "hd";
@@ -387,6 +402,8 @@ export interface Photo {
   width: number;
   height: number;
   faces: number[][]; // descripteurs de visages (128 valeurs chacun)
+  /** Pour chaque visage : position et signature de la tenue (reconnaissance « Retrouve-moi »). */
+  faceMeta?: FaceMeta[] | null;
   uploadedBy: string;
   createdAt: string;
 }

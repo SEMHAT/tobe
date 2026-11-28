@@ -105,6 +105,7 @@ export const routes: Route[] = [
   // Photos
   { method: "POST", path: "/photos/match", handler: (s, c) => s.matchSelfie(c.userId, c.body?.descriptors ?? c.body?.descriptor, c.body?.eventId) },
   { method: "DELETE", path: "/photos/:id", handler: (s, c) => s.removePhoto(need(c), c.params.id) },
+  { method: "POST", path: "/photos/:id/claim", handler: (s, c) => s.claimPhoto(need(c), c.params.id, Number(c.body?.face), c.body?.ok === true) },
   { method: "POST", path: "/photos/:id/download", handler: (s, c) => s.downloadPhoto(need(c), c.params.id) },
   { method: "POST", path: "/events/:id/photo-pass", handler: (s, c) => s.buyPhotoPass(need(c), c.params.id, c.body?.tier, c.body?.method ?? "online") },
   { method: "POST", path: "/events/:id/photo-guests", handler: (s, c) => s.addPhotoGuest(need(c), c.params.id, c.body) },

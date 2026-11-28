@@ -11,10 +11,12 @@ import { waLink } from "./TeamInvite";
 import { Button, Field, Sheet, cx, inputCls } from "./ui";
 import { Img, Poster } from "./visual";
 
-export type GroupPhoto = { id: string; url: string; width: number; height: number; distance: number; unlocked?: boolean; guest?: string };
+export type GroupPhoto = { id: string; url: string; width: number; height: number; distance: number; unlocked?: boolean; guest?: string; via?: "visage" | "soirée" | "confirmé" };
+export type Suggestion = { photoId: string; face: number; url: string; width: number; height: number; box: [number, number, number, number] | null; outfit: number | null };
 export type PhotoGroup = {
   event: EventCard;
   photos: GroupPhoto[];
+  suggestions?: Suggestion[];
   tier?: PhotoTier;
   paid?: number;
   freeLeft?: number;
@@ -138,6 +140,11 @@ export function PhotoPassGallery({ g, canBuy, onChange }: { g: PhotoGroup; canBu
                 <Lock className="size-3.5 text-white" />
               </span>
             )}
+            {p.via === "soirée" && !p.guest && (
+              <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white" title="Retrouvée grâce à votre look de la soirée">
+                look du soir
+              </span>
+            )}
             {p.guest && <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white">{p.guest}</span>}
           </button>
         ))}
@@ -147,6 +154,8 @@ export function PhotoPassGallery({ g, canBuy, onChange }: { g: PhotoGroup; canBu
           Tout télécharger ({available.length})
         </Button>
       )}
+
+      {!!g.suggestions?.length && <MaybeYou list={g.suggestions} onChange={onChange} />}
 
       {tier === "hd" && <GuestFaces g={g} onChange={onChange} />}
 
@@ -357,6 +366,67 @@ function GuestFaces({ g, onChange }: { g: PhotoGroup; onChange: () => void }) {
         )}
       </Sheet>
       <CameraSheet open={camera} onClose={() => setCamera(false)} onDescriptors={addChild} mode="enroll" title={`Visage de ${name || "l'enfant"}`} />
+    </div>
+  );
+}
+
+/** Zoom sur un visage d'une photo (aperçu public), à partir de sa position. */
+function FaceCrop({ s }: { s: Suggestion }) {
+  if (!s.box || s.box[2] <= 0) return <Img src={s.url} className="size-full object-cover" />;
+  const [x, y, w, h] = s.box;
+  // On cadre large : visage + épaules, pour aider à se reconnaître (tête baissée, profil…).
+  const side = Math.min(1, Math.max(w * (s.width / s.height) < 1 ? h * 2.6 : w * 2.6, 0.12));
+  const cw = side * (s.height / s.width) > 1 ? 1 : side * (s.height / s.width);
+  const ch = side;
+  const cx = Math.min(Math.max(x + w / 2 - cw / 2, 0), 1 - cw);
+  const cy = Math.min(Math.max(y + h * 0.6 - ch / 2, 0), 1 - ch);
+  return (
+    <div
+      className="size-full bg-no-repeat"
+      style={{ backgroundImage: `url(${s.url})`, backgroundSize: `${100 / cw}% ${100 / ch}%`, backgroundPosition: `${cw >= 1 ? 0 : (cx / (1 - cw)) * 100}% ${ch >= 1 ? 0 : (cy / (1 - ch)) * 100}%` }}
+    />
+  );
+}
+
+/** « Peut-être vous » : têtes baissées, profils, contre-jour… la personne confirme, et ToBe apprend son visage. */
+function MaybeYou({ list, onChange }: { list: Suggestion[]; onChange: () => void }) {
+  const { toast } = useSession();
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const answer = async (sg: Suggestion, ok: boolean) => {
+    const k = `${sg.photoId}:${sg.face}`;
+    setDone((d) => new Set(d).add(k));
+    try {
+      await api("POST", `/photos/${sg.photoId}/claim`, { face: sg.face, ok });
+      if (ok) toast("Ajoutée à vos photos. ToBe vous reconnaîtra mieux la prochaine fois.");
+      onChange();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const left = list.filter((sg) => !done.has(`${sg.photoId}:${sg.face}`));
+  if (!left.length) return null;
+  return (
+    <div className="mt-4 rounded-2xl border border-brand/30 bg-brand/5 p-4">
+      <div className="font-semibold">Peut-être vous ({left.length})</div>
+      <p className="mt-0.5 text-xs text-muted">Tête baissée, de profil, de dos ou dans le noir : ToBe a trouvé ces visages grâce à votre look et votre tenue de la soirée. Répondez, et ToBe vous reconnaîtra encore mieux.</p>
+      <div className="mt-3 flex gap-3 overflow-x-auto pb-1">
+        {left.slice(0, 12).map((sg) => (
+          <div key={`${sg.photoId}:${sg.face}`} className="w-32 shrink-0">
+            <div className="aspect-[3/4] overflow-hidden rounded-xl bg-card-2">
+              <FaceCrop s={sg} />
+            </div>
+            {sg.outfit !== null && sg.outfit >= 0.72 && <div className="mt-1 text-[10px] font-semibold text-brand">Même tenue que vous</div>}
+            <div className="mt-1.5 grid grid-cols-2 gap-1">
+              <button className="rounded-full bg-brand py-1.5 text-xs font-bold text-white" onClick={() => answer(sg, true)}>
+                C'est moi
+              </button>
+              <button className="rounded-full bg-card-2 py-1.5 text-xs font-semibold text-muted" onClick={() => answer(sg, false)}>
+                Pas moi
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
