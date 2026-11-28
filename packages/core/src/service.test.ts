@@ -162,3 +162,44 @@ test("création sans paiement : vote forcé gratuit, cagnotte et boost ignorés,
   const admin = login("admin@tobe.test").user;
   assert.equal(svc.adminOverview(admin.id).requests[0].phone, "+22891000000");
 });
+
+test("un événement retiré ou supprimé ferme son vote, sa galerie et sa cagnotte partout", () => {
+  const { svc, db, login } = setup();
+  const u = login("vote2@exemple.tg").user;
+  const c = db.contests.get("cnt_miss")!;
+  assert.ok(svc.home().contests.some((x) => x.id === c.id));
+  // Retiré par ToBe : plus dans « Votes en cours », plus consultable ni votable par le public.
+  db.events.update(c.eventId, { moderation: "suspended" });
+  assert.ok(!svc.home().contests.some((x) => x.id === c.id));
+  assert.throws(() => svc.contestView(c.id, u.id), (e: ApiError) => e.status === 410);
+  assert.throws(() => svc.vote(u.id, c.id, { candidateId: c.candidates[0].id, pack: "free" }), (e: ApiError) => e.status === 410);
+  assert.throws(() => svc.listPhotos(c.eventId, u.id), (e: ApiError) => e.status === 410);
+  // Supprimé : le vote orphelin ne s'affiche nulle part.
+  db.events.update(c.eventId, { moderation: null });
+  db.events.remove(c.eventId);
+  assert.ok(!svc.home().contests.some((x) => x.id === c.id));
+  assert.throws(() => svc.contestView(c.id, null), (e: ApiError) => e.status === 410);
+});
+
+test("supprimer un événement supprime aussi son vote et sa cagnotte", () => {
+  const { svc, db, login } = setup();
+  const org = login("orga2@exemple.tg", "Orga").user;
+  const ev = svc.createEvent(org.id, {
+    title: "Petit concours",
+    category: "concours",
+    startsAt: "2026-12-05T19:00:00Z",
+    venue: "Salle",
+    description: "Venez",
+    visibility: "public",
+    access: "free",
+    expectedAttendance: 50,
+    reach: "quartier",
+    options: { votes: true, cagnotte: false, gallery: true, live: false },
+    contest: { mode: "free", closesAt: "2026-12-05T18:00:00Z", results: "live", candidates: [{ name: "A" }, { name: "B" }] },
+  } as never);
+  const contestId = ev.contestId!;
+  assert.ok(db.contests.get(contestId));
+  svc.deleteEvent(org.id, ev.id);
+  assert.equal(db.contests.get(contestId), undefined);
+  assert.throws(() => svc.contestView(contestId, null), (e: ApiError) => e.status === 404);
+});

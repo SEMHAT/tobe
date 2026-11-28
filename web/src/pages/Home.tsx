@@ -99,7 +99,7 @@ function MobileHome({ data, error, loading, reload }: { data: HomeData | null; e
       )}
 
       {data && data.weekend.length > 0 && (
-        <Section title="Bientôt à Lomé" action={<Link to="/explorer?when=week" className="flex items-center text-sm font-semibold text-brand">Tout voir <ChevronRight className="size-4" /></Link>}>
+        <Section title="Bientôt à Lomé" action={<Link to="/evenements-a-lome" className="flex items-center text-sm font-semibold text-brand">Tout l'agenda <ChevronRight className="size-4" /></Link>}>
           <div className="no-scrollbar flex gap-4 overflow-x-auto px-5">
             {data.weekend.map((e) => (
               <TileCard key={e.id} e={e} />

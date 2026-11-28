@@ -593,7 +593,7 @@ export class ToBeService {
       .filter((c) => new Date(c.closesAt) > this.now())
       .map((c) => {
         const e = this.db.events.get(c.eventId);
-        if (!e || e.visibility !== "public") return null;
+        if (!this.isLive(e) || e.visibility !== "public") return null;
         return this.contestView(c.id, null);
       })
       .filter((c): c is ContestView => !!c)
@@ -607,6 +607,27 @@ export class ToBeService {
     const e = this.db.events.get(idOrSlug) ?? this.db.events.find((x) => x.slug === idOrSlug);
     if (!e) throw new ApiError(404, "Événement introuvable");
     return e;
+  }
+
+  /**
+   * Vote, cagnotte, galerie, reventes… suivent leur événement : supprimé, retiré par ToBe ou en vérification,
+   * ils sont fermés au public partout (seuls l'équipe de l'événement et ToBe y gardent accès).
+   * `agir` ferme aussi les nouvelles actions (voter, contribuer) quand l'événement est annulé.
+   */
+  private gateEvent(eventId: string | null | undefined, user: User | null, agir = false): TobeEvent | null {
+    if (!eventId) return null;
+    const e = this.db.events.get(eventId);
+    if (!e) throw new ApiError(410, "Cet événement a été supprimé.");
+    const equipe = !!user && (!!this.team.access(e, user).role || this.team.can(user, "providers.moderate"));
+    if (e.moderation && !equipe)
+      throw new ApiError(e.moderation === "suspended" ? 410 : 403, e.moderation === "suspended" ? "Cet événement a été retiré par ToBe." : "Cet événement est en cours de vérification par l'équipe ToBe.");
+    if (agir && e.cancelledAt) throw new ApiError(400, "Cet événement a été annulé.");
+    return e;
+  }
+
+  /** Visible du public : existe, ni retiré, ni en vérification, ni annulé. */
+  private isLive(e: TobeEvent | undefined | null): e is TobeEvent {
+    return !!e && !e.moderation && !e.cancelledAt;
   }
 
   /** Droit de modifier l'événement (organisateur, co-organisateur, équipe ToBe habilitée). */
@@ -1021,6 +1042,21 @@ export class ToBeService {
     const e = this.findEvent(idOrSlug);
     if (!this.team.access(e, user).delete) throw new ApiError(403, "Seul l'organisateur peut supprimer cet événement");
     if (this.attendees(e) > 0) throw new ApiError(400, "Des billets ont été vendus : annulez l'événement, les acheteurs seront remboursés automatiquement");
+    // L'argent déjà versé (votes payants, contributions) doit rester traçable : on annule plutôt que de supprimer.
+    const contests = this.db.contests.filter((c) => c.eventId === e.id);
+    const cagnottes = this.db.cagnottes.filter((c) => c.eventId === e.id);
+    if (this.db.votes.some((v) => v.kind === "paid" && contests.some((c) => c.id === v.contestId)) || this.db.contributions.some((x) => cagnottes.some((c) => c.id === x.cagnotteId)))
+      throw new ApiError(400, "De l'argent a été versé (votes payants ou cagnotte) : annulez l'événement plutôt que de le supprimer");
+    // Tout ce qui dépend de l'événement disparaît avec lui, pour qu'aucune page n'y renvoie encore.
+    for (const c of contests) {
+      for (const v of this.db.votes.filter((x) => x.contestId === c.id)) this.db.votes.remove(v.id);
+      this.db.contests.remove(c.id);
+    }
+    for (const c of cagnottes) this.db.cagnottes.remove(c.id);
+    for (const ph of this.db.photos.filter((x) => x.eventId === e.id)) this.db.photos.remove(ph.id);
+    for (const r of this.db.reminders.filter((x) => x.eventId === e.id)) this.db.reminders.remove(r.id);
+    for (const m of this.db.members.filter((x) => x.eventId === e.id)) this.db.members.remove(m.id);
+    for (const r of this.db.resales.filter((x) => x.eventId === e.id)) this.db.resales.remove(r.id);
     this.db.events.remove(e.id);
     return { ok: true };
   }
@@ -1736,7 +1772,9 @@ export class ToBeService {
 
   /** Billets en revente pour un événement (prix officiel au plus). */
   eventResales(idOrSlug: string, userId: string | null) {
-    const eventId = this.findEvent(idOrSlug).id;
+    const e = this.findEvent(idOrSlug);
+    if (!this.isLive(e)) return [];
+    const eventId = e.id;
     return this.db.resales
       .filter((r) => r.eventId === eventId && r.status === "listed" && !this.resaleLocked(r.id))
       .sort((a, b) => a.price - b.price)
@@ -1886,8 +1924,8 @@ export class ToBeService {
   contestView(contestId: string, userId: string | null): ContestView {
     const c = this.db.contests.get(contestId);
     if (!c) throw new ApiError(404, "Concours introuvable");
-    const e = this.db.events.get(c.eventId);
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
+    const e = this.gateEvent(c.eventId, user);
     const manage = !!e && this.canManage(e, user);
     const now = this.now();
     const isOpen = new Date(c.opensAt) <= now && new Date(c.closesAt) > now;
@@ -1935,6 +1973,8 @@ export class ToBeService {
     const user = this.requireUser(userId);
     const c = this.db.contests.get(contestId);
     if (!c) throw new ApiError(404, "Concours introuvable");
+    // Un paiement déjà encaissé (settle) est toujours honoré ; sinon l'événement doit être en ligne.
+    if (!settle) this.gateEvent(c.eventId, user, true);
     const now = this.now();
     if (!settle && new Date(c.opensAt) > now) throw new ApiError(400, "Le vote n'est pas encore ouvert");
     if (!settle && new Date(c.closesAt) <= now) throw new ApiError(400, "Le vote est clôturé");
@@ -2031,8 +2071,8 @@ export class ToBeService {
   getCagnotte(cagnotteId: string, userId: string | null, code?: string | null) {
     const cg = this.db.cagnottes.get(cagnotteId);
     if (!cg) throw new ApiError(404, "Cagnotte introuvable");
-    const e = this.db.events.get(cg.eventId);
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
+    const e = this.gateEvent(cg.eventId, user);
     if (e && !this.canView(e, user, code)) throw new ApiError(403, "Cagnotte réservée aux invités", { needCode: true, eventId: e.id });
     const manage = !!e && this.canManage(e, user);
     const contributions = this.db.contributions
@@ -2046,7 +2086,7 @@ export class ToBeService {
     const user = this.requireUser(userId);
     const cg = this.db.cagnottes.get(cagnotteId);
     if (!cg) throw new ApiError(404, "Cagnotte introuvable");
-    const e = this.db.events.get(cg.eventId);
+    const e = settle ? (this.db.events.get(cg.eventId) ?? null) : this.gateEvent(cg.eventId, user, true);
     if (!settle && e && !this.canView(e, user, input.code)) throw new ApiError(403, "Cagnotte réservée aux invités");
     this.requirePayments("Contributions");
     const amount = Math.round(input.amount);
@@ -2076,8 +2116,8 @@ export class ToBeService {
   // Photos et Pass ToBe
   // =====================================================================
   listPhotos(idOrSlug: string, userId: string | null, code?: string | null) {
-    const e = this.findEvent(idOrSlug);
     const user = userId ? (this.db.users.get(userId) ?? null) : null;
+    const e = this.gateEvent(this.findEvent(idOrSlug).id, user)!;
     if (!this.canView(e, user, code)) throw new ApiError(403, "Galerie réservée aux invités");
     const hidden = this.db.users.filter((u) => u.neverShow && userFaces(u).length > 0).map((u) => userFaces(u));
     return this.db.photos

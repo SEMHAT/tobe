@@ -55,6 +55,10 @@
       "destination": "/api/seo?p=/organiser"
     },
     {
+      "source": "/evenements-a-lome",
+      "destination": "/api/seo?p=/evenements-a-lome"
+    },
+    {
       "source": "/evenement/:id",
       "destination": "/api/seo?p=/evenement/:id"
     },
