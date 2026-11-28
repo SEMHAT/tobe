@@ -51,6 +51,10 @@
       "destination": "/api/seo?p=/prestataires"
     },
     {
+      "source": "/organiser",
+      "destination": "/api/seo?p=/organiser"
+    },
+    {
       "source": "/evenement/:id",
       "destination": "/api/seo?p=/evenement/:id"
     },

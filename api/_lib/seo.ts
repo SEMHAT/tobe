@@ -93,7 +93,7 @@ const CATEGORIES: Record<string, string> = {
 // Pages fixes
 // ---------------------------------------------------------------------------
 
-const navLinks = `<nav><a href="/">Accueil</a> · <a href="/explorer">Agenda des événements à Lomé</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/photos">Retrouver mes photos</a> · <a href="/observatoire">Observatoire des événements</a> · <a href="/securite">Payer en sécurité</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
+const navLinks = `<nav><a href="/">Accueil</a> · <a href="/explorer">Agenda des événements à Lomé</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/organiser">Organisation d'événements</a> · <a href="/photos">Retrouver mes photos</a> · <a href="/observatoire">Observatoire des événements</a> · <a href="/securite">Payer en sécurité</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
 
 function eventList(events: SeoEvent[]) {
   if (!events.length) return "<p>Aucun événement public à venir pour le moment. Les organisateurs publient leurs événements sur ToBe en 2 minutes.</p>";
@@ -142,10 +142,11 @@ const ORG_LD = {
       alternateName: "ToBe",
       url: `${SITE}/`,
       logo: `${SITE}/icon-512.png`,
-      description: "Plateforme des événements de Lomé : agenda, billetterie Mobile Money, votes, cagnottes et galeries photo avec reconnaissance faciale.",
+      description: "Plateforme et agence des événements de Lomé : agenda, billetterie Mobile Money, votes, cagnottes, galeries photo, et organisation complète d'événements.",
+      slogan: "We bring events to life.",
       areaServed: { "@type": "Country", name: "Togo" },
       address: { "@type": "PostalAddress", addressLocality: "Lomé", addressCountry: "TG" },
-      parentOrganization: { "@type": "Organization", name: "ELEDJI", url: "https://eledji.com" },
+      parentOrganization: { "@type": "Organization", name: "ELEDJI SARL U", alternateName: "ELEDJI", url: "https://eledji.com/entreprise" },
     },
   ],
 };
@@ -176,6 +177,42 @@ export function infoMeta(page: "observatoire" | "securite" | "confidentialite"):
   } as const;
   const [title, description, h1, text] = pages[page];
   return { status: 200, title, description, canonical: `${SITE}/${page}`, image: DEFAULT_IMAGE, robots: null, jsonLd: [], body: `<main><h1>${esc(h1)}</h1><p>${esc(text)}</p>${navLinks}</main>` };
+}
+
+/** Agence : ToBe organise l'événement du client (page /organiser). */
+export const AGENCY = {
+  title: "Organisation d'événements à Lomé | ToBe",
+  description: "ToBe organise votre événement à Lomé : mariage, anniversaire, lancement, séminaire, concert. Concept, prestataires, décoration, communication et jour J.",
+  h1: "Organisation d'événements à Lomé",
+  text: "L'agence ToBe conçoit, organise et fait connaître votre événement : mariages et fêtes de famille, lancements, séminaires, conférences, galas, concerts et festivals. Un seul interlocuteur, une équipe de maîtres de cérémonie, décorateurs, techniciens, photographes et communicants, un devis écrit, une coordination complète le jour J et un bilan après l'événement.",
+  services: ["Conception du concept, du programme et du budget", "Choix du lieu et coordination des prestataires", "Décoration et mise en scène", "Son, lumière et animation", "Communication, invitations et billetterie", "Photo et vidéo, avec galerie et Pass ToBe", "Coordination complète le jour J"],
+} as const;
+
+export function agencyMeta(): PageMeta {
+  const url = `${SITE}/organiser`;
+  return {
+    status: 200,
+    title: AGENCY.title,
+    description: AGENCY.description,
+    canonical: url,
+    image: DEFAULT_IMAGE,
+    robots: null,
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "Service",
+        "@id": `${url}#service`,
+        name: "Organisation d'événements à Lomé",
+        serviceType: "Organisation d'événements",
+        url,
+        description: AGENCY.description,
+        provider: { "@id": `${SITE}/#org` },
+        areaServed: { "@type": "City", name: "Lomé" },
+        hasOfferCatalog: { "@type": "OfferCatalog", name: "Services de l'agence ToBe", itemListElement: AGENCY.services.map((s) => ({ "@type": "Offer", itemOffered: { "@type": "Service", name: s } })) },
+      },
+    ],
+    body: `<main><h1>${esc(AGENCY.h1)}</h1><p>${esc(AGENCY.text)}</p><ul>${AGENCY.services.map((s) => `<li>${esc(s)}</li>`).join("")}</ul><p><a href="/organiser">Demander un devis</a></p>${navLinks}</main>`,
+  };
 }
 
 export function providersMeta(): PageMeta {

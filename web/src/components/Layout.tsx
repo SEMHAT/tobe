@@ -123,8 +123,9 @@ function Footer() {
           <ul className="mt-3 space-y-2 text-sm text-muted">
             <li><Link className="hover:text-ink" to="/creer">Créer un événement</Link></li>
             <li><Link className="hover:text-ink" to="/organisateur">Espace organisateur</Link></li>
+            <li><Link className="hover:text-ink" to="/organiser">Organisation d'événements</Link></li>
             <li><Link className="hover:text-ink" to="/prestataires">Prestataires</Link></li>
-            <li><a className="hover:text-ink" href="https://eledji.com">Un service ELEDJI</a></li>
+            <li><a className="hover:text-ink" href="https://eledji.com/entreprise">Une marque ELEDJI</a></li>
           </ul>
         </div>
         <div className="flex items-center gap-4 rounded-3xl border border-line bg-app p-4">

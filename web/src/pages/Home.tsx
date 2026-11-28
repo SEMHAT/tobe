@@ -148,6 +148,10 @@ function MobileHome({ data, error, loading, reload }: { data: HomeData | null; e
           <div className="mt-1 text-xs text-muted">MC, déco, son, photo : trouvez ou rejoignez l'annuaire.</div>
         </Link>
       </div>
+      <Link to="/organiser" className="mx-5 mb-4 flex items-center justify-between gap-3 rounded-[20px] px-1 py-2 text-sm text-muted">
+        <span>Un mariage, un lancement, un concert ? <span className="font-semibold text-ink">On l'organise pour vous.</span></span>
+        <ChevronRight className="size-4 shrink-0 text-brand" />
+      </Link>
     </div>
   );
 }
@@ -431,7 +435,7 @@ function DesktopHome({ data, loading }: { data: HomeData | null; loading: boolea
           <Feature icon={<Ticket />} title="Billets et entrée" text="Réservation en quelques secondes, billet QR code sur le téléphone, scan à l'entrée par l'organisateur." to="/explorer" cta="Trouver un événement" />
           <Feature icon={<Crown />} title="Votes transparents" text="Concours, awards, élections du public : un compte par personne, un certificat publié à la clôture." to="/creer" cta="Lancer un vote" />
           <Feature icon={<ScanFace />} title="Pass ToBe" text="Un selfie une seule fois : vous êtes prévenu dès que vous apparaissez sur les photos d'un événement." to="/photos" cta="Activer mon Pass" />
-          <Feature icon={<Sparkles />} title="Confier à ToBe" text="Animation, son et lumière, décoration, communication : l'agence prend en charge votre événement." to="/creer" cta="Demander un devis" dark />
+          <Feature icon={<Sparkles />} title="Confier à ToBe" text="Animation, son et lumière, décoration, communication : l'agence prend en charge votre événement." to="/organiser" cta="Comment on organise" dark />
         </div>
       </section>
 
@@ -450,6 +454,10 @@ function DesktopHome({ data, loading }: { data: HomeData | null; loading: boolea
                 Espace organisateur
               </Link>
             </div>
+            <p className="mt-5 text-sm text-white/60">
+              Vous préférez nous confier toute l'organisation ?{" "}
+              <Link to="/organiser" className="font-semibold text-white underline-offset-4 hover:underline">Voir comment on travaille →</Link>
+            </p>
           </div>
           <ol className="space-y-4">
             {[
