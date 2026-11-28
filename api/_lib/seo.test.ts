@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { agencyMeta, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
+import { agencyMeta, lomeMeta, periodes, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
 import { urlsAfter } from "./indexnow.js";
 
 const TEMPLATE = `<!doctype html><html lang="fr"><head>
@@ -179,7 +179,7 @@ test("IndexNow : seulement après une action sur un événement", () => {
   assert.deepEqual(urlsAfter("GET", "/events/x", { slug: "a" }), []);
   assert.deepEqual(urlsAfter("POST", "/me/face", {}), []);
   assert.ok(urlsAfter("POST", "/events", { slug: "fete" }).includes("https://tobe.eledji.com/evenement/fete"));
-  assert.ok(urlsAfter("POST", "/admin/events/e1/moderation", {}).includes("https://tobe.eledji.com/explorer"));
+  assert.ok(urlsAfter("POST", "/admin/events/e1/moderation", {}).includes("https://tobe.eledji.com/explorer") && urlsAfter("POST", "/admin/events/e1/moderation", {}).includes("https://tobe.eledji.com/evenements-a-lome"));
 });
 
 test("page agence : canonique, description courte, données Service", () => {
@@ -189,4 +189,20 @@ test("page agence : canonique, description courte, données Service", () => {
   assert.ok(a.title.length <= 60);
   assert.ok(a.body.includes("<h1>"));
   assert.equal((a.jsonLd[0] as { "@type": string })["@type"], "Service");
+});
+
+test("page Événements à Lomé : périodes, données, titre court", () => {
+  const now = new Date("2026-11-25T10:00:00Z"); // mercredi
+  const a = ev({ id: "a", slug: "samedi", title: "Concert du samedi", startsAt: "2026-11-28T19:00:00Z" });
+  const b = ev({ id: "b", slug: "lundi", title: "Conférence du lundi", startsAt: "2026-11-30T09:00:00Z" });
+  const c = ev({ id: "c", slug: "decembre", title: "Gala de décembre", startsAt: "2026-12-15T19:00:00Z" });
+  const d = ev({ id: "d", slug: "fevrier", title: "Festival de février", startsAt: "2027-02-10T19:00:00Z" });
+  const p = periodes([a, b, c, d], now);
+  assert.deepEqual([p.weekend, p.semaine, p.mois, p.plusTard].map((l) => l.map((e) => e.id)), [["a"], ["b"], ["c"], ["d"]]);
+  const m = lomeMeta([a, b, c, d], now);
+  assert.equal(m.canonical, "https://tobe.eledji.com/evenements-a-lome");
+  assert.ok(m.title.length <= 60 && m.description.length <= 160);
+  assert.match(m.body, /<h1>Événements à Lomé<\/h1>/);
+  assert.match(m.body, /Ce week-end à Lomé[\s\S]*Concert du samedi/);
+  assert.match(JSON.stringify(m.jsonLd), /FAQPage/);
 });

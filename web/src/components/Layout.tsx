@@ -109,6 +109,7 @@ function Footer() {
           <div className="text-sm font-bold">Découvrir</div>
           <ul className="mt-3 space-y-2 text-sm text-muted">
             <li><Link className="hover:text-ink" to="/explorer">Tous les événements</Link></li>
+            <li><Link className="hover:text-ink" to="/evenements-a-lome">Événements à Lomé</Link></li>
             <li><Link className="hover:text-ink" to="/explorer?when=weekend">Ce week-end</Link></li>
             <li><Link className="hover:text-ink" to="/photos">Pass ToBe</Link></li>
             <li><Link className="hover:text-ink" to="/securite">Payer en toute sécurité</Link></li>

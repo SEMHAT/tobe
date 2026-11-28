@@ -93,7 +93,7 @@ const CATEGORIES: Record<string, string> = {
 // Pages fixes
 // ---------------------------------------------------------------------------
 
-const navLinks = `<nav><a href="/">Accueil</a> · <a href="/explorer">Agenda des événements à Lomé</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/organiser">Organisation d'événements</a> · <a href="/photos">Retrouver mes photos</a> · <a href="/observatoire">Observatoire des événements</a> · <a href="/securite">Payer en sécurité</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
+const navLinks = `<nav><a href="/">Accueil</a> · <a href="/evenements-a-lome">Événements à Lomé</a> · <a href="/explorer">Rechercher un événement</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/organiser">Organisation d'événements</a> · <a href="/photos">Retrouver mes photos</a> · <a href="/observatoire">Observatoire des événements</a> · <a href="/securite">Payer en sécurité</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
 
 function eventList(events: SeoEvent[]) {
   if (!events.length) return "<p>Aucun événement public à venir pour le moment. Les organisateurs publient leurs événements sur ToBe en 2 minutes.</p>";
@@ -105,7 +105,7 @@ function eventList(events: SeoEvent[]) {
 export function explorerMeta(upcoming: SeoEvent[]): PageMeta {
   return {
     status: 200,
-    title: "Agenda des événements à Lomé : concerts, soirées, festivals | ToBe Lomé",
+    title: "Rechercher un événement à Lomé par date et catégorie | ToBe",
     description:
       "Que faire à Lomé ? L'agenda des événements mis à jour chaque jour : concerts, soirées, conférences, concours et festivals. Réservez vos places sur ToBe.",
     canonical: `${SITE}/explorer`,
@@ -119,7 +119,79 @@ export function explorerMeta(upcoming: SeoEvent[]): PageMeta {
         itemListElement: upcoming.slice(0, 50).map((e, i) => ({ "@type": "ListItem", position: i + 1, url: `${SITE}/evenement/${e.slug}`, name: e.title })),
       },
     ],
-    body: `<main><h1>Agenda des événements à Lomé</h1><p>Concerts, soirées, conférences, concours, festivals : tous les événements publics de Lomé, avec réservation des places en ligne.</p>${eventList(upcoming)}${navLinks}</main>`,
+    body: `<main><h1>Rechercher un événement à Lomé</h1><p>Concerts, soirées, conférences, concours, festivals : cherchez un événement par date, catégorie ou prix. L'agenda complet est sur la page <a href="/evenements-a-lome">Événements à Lomé</a>.</p>${eventList(upcoming)}${navLinks}</main>`,
+  };
+}
+
+/** Répartit les événements à venir : ce week-end, cette semaine, ce mois-ci, plus tard (heure de Lomé = UTC). */
+export function periodes(events: SeoEvent[], now = new Date()) {
+  const DAY = 86_400_000;
+  const debut = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const dow = new Date(debut).getUTCDay();
+  const vendredi = dow === 6 ? debut - DAY : dow === 0 ? debut - 2 * DAY : debut + ((5 - dow + 7) % 7) * DAY;
+  const finWeekend = vendredi + 3 * DAY;
+  const enCours = (e: SeoEvent, from: number, to: number) => {
+    const t = new Date(e.startsAt).getTime();
+    const end = e.endsAt ? new Date(e.endsAt).getTime() : t + 8 * 3600_000;
+    return t < to && end >= from;
+  };
+  const vus = new Set<string>();
+  const prendre = (f: (e: SeoEvent) => boolean) => events.filter((e) => !vus.has(e.id) && f(e)).map((e) => (vus.add(e.id), e));
+  const weekend = prendre((e) => enCours(e, Math.max(vendredi, debut), finWeekend));
+  const semaine = prendre((e) => enCours(e, debut, debut + 7 * DAY));
+  const mois = prendre((e) => enCours(e, debut, debut + 31 * DAY));
+  const plusTard = prendre(() => true);
+  return { weekend, semaine, mois, plusTard };
+}
+
+/** Page « Événements à Lomé » : l'agenda de la ville, rangé par période, mis à jour à chaque visite. */
+export const LOME = {
+  title: "Événements à Lomé : que faire cette semaine ? | ToBe",
+  description: "Tous les événements à Lomé : concerts, soirées, conférences, festivals et concours, ce week-end, cette semaine et ce mois-ci. Mis à jour chaque jour.",
+  h1: "Événements à Lomé",
+  intro: "Concerts, soirées, conférences, festivals, concours, spectacles : voici l'agenda des événements publics à Lomé, mis à jour chaque jour par les organisateurs sur ToBe. Réservez vos places en Mobile Money, votez pour vos candidats et retrouvez vos photos après l'événement.",
+} as const;
+
+export function lomeMeta(upcoming: SeoEvent[], now = new Date()): PageMeta {
+  const p = periodes(upcoming, now);
+  const bloc = (titre: string, list: SeoEvent[]) => (list.length ? `<h2>${esc(titre)}</h2>${eventList(list)}` : "");
+  const prochain = upcoming.slice(0, 3).map((e) => e.title).join(", ");
+  const faq: Array<[string, string]> = [
+    ["Que faire à Lomé ce week-end ?", p.weekend.length ? `Ce week-end à Lomé : ${p.weekend.slice(0, 5).map((e) => e.title).join(", ")}. Retrouvez tout l'agenda sur ToBe.` : `Consultez l'agenda ToBe des prochains jours${prochain ? ` : ${prochain}` : ""}.`],
+    ["Où trouver les événements à Lomé ?", "Sur ToBe (tobe.eledji.com), l'agenda des événements de Lomé : concerts, soirées, conférences, concours et festivals, avec réservation en ligne."],
+    ["Comment publier mon événement à Lomé ?", "Créez votre événement gratuitement sur ToBe en 2 minutes : il apparaît dans l'agenda et vous pouvez vendre vos billets en Mobile Money."],
+  ];
+  return {
+    status: 200,
+    title: LOME.title,
+    description: LOME.description,
+    canonical: `${SITE}/evenements-a-lome`,
+    image: DEFAULT_IMAGE,
+    robots: null,
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        name: LOME.h1,
+        url: `${SITE}/evenements-a-lome`,
+        about: { "@type": "City", name: "Lomé" },
+        mainEntity: {
+          "@type": "ItemList",
+          name: "Événements à venir à Lomé",
+          itemListElement: upcoming.slice(0, 50).map((e, i) => ({ "@type": "ListItem", position: i + 1, url: `${SITE}/evenement/${e.slug}`, name: e.title })),
+        },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: faq.map(([q, r]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: r } })),
+      },
+    ],
+    body: `<main><h1>${esc(LOME.h1)}</h1><p>${esc(LOME.intro)}</p>${
+      upcoming.length
+        ? bloc("Ce week-end à Lomé", p.weekend) + bloc("Cette semaine", p.semaine) + bloc("Ce mois-ci", p.mois) + bloc("Plus tard", p.plusTard)
+        : eventList([])
+    }${faq.map(([q, r]) => `<h2>${esc(q)}</h2><p>${esc(r)}</p>`).join("")}${navLinks}</main>`,
   };
 }
 

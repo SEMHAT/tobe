@@ -26,5 +26,5 @@ export function urlsAfter(method: string, path: string, body: unknown): string[]
   const slug = (body as { slug?: string } | null)?.slug ?? (body as { event?: { slug?: string } } | null)?.event?.slug;
   const touchesEvent = /^\/events(\/[^/]+)?(\/(cancel|proof))?$/.test(path) || /^\/admin\/events\/[^/]+\/moderation$/.test(path);
   if (!touchesEvent) return [];
-  return [`${SITE}/`, `${SITE}/explorer`, ...(slug ? [`${SITE}/evenement/${encodeURIComponent(slug)}`] : [])];
+  return [`${SITE}/`, `${SITE}/evenements-a-lome`, `${SITE}/explorer`, ...(slug ? [`${SITE}/evenement/${encodeURIComponent(slug)}`] : [])];
 }

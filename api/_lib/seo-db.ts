@@ -1,5 +1,5 @@
 // Lectures en base pour le référencement (aucune écriture). Le pool est injecté : testable avec PGlite.
-import { SITE, agencyMeta, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isListed, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
+import { SITE, agencyMeta, lomeMeta, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isListed, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
 import { ensureSchema, type PgPool } from "./store.js";
 
 export function seoQueries(pool: PgPool) {
@@ -34,22 +34,27 @@ export function seoQueries(pool: PgPool) {
     };
     if (parts.length === 0) return homeMeta(await upcoming());
     if (parts.length === 1 && parts[0] === "explorer") return explorerMeta(await upcoming());
+    if (parts.length === 1 && parts[0] === "evenements-a-lome") return lomeMeta(await upcoming());
     if (parts.length === 1 && (parts[0] === "observatoire" || parts[0] === "securite" || parts[0] === "confidentialite")) return infoMeta(parts[0]);
     if (parts.length === 1 && parts[0] === "prestataires") return providersMeta();
     if (parts.length === 1 && parts[0] === "organiser") return agencyMeta();
     if (parts.length === 2 && parts[0] === "evenement") {
       const e = await one<SeoEvent>("events", parts[1], true);
-      return e ? eventMeta(e) : notFoundMeta();
+      // Retiré par ToBe : la page disparaît de Google comme si elle était supprimée.
+      return e && e.moderation !== "suspended" ? eventMeta(e) : notFoundMeta();
     }
     if (parts.length === 2 && parts[0] === "vote") {
       const c = await one<SeoContest>("contests", parts[1]);
-      if (!c) return notFoundMeta();
-      return contestMeta(c, await one<SeoEvent>("events", c.eventId));
+      const e = c ? await one<SeoEvent>("events", c.eventId) : null;
+      // Le vote suit son événement : supprimé ou retiré, la page n'existe plus.
+      if (!c || !e || e.moderation) return notFoundMeta();
+      return contestMeta(c, e);
     }
     if (parts.length === 2 && parts[0] === "cagnotte") {
       const g = await one<SeoCagnotte>("cagnottes", parts[1]);
-      if (!g) return notFoundMeta();
-      return cagnotteMeta(g, await one<SeoEvent>("events", g.eventId));
+      const e = g ? await one<SeoEvent>("events", g.eventId) : null;
+      if (!g || !e || e.moderation) return notFoundMeta();
+      return cagnotteMeta(g, e);
     }
     return notFoundMeta();
   }
@@ -62,6 +67,7 @@ export function seoQueries(pool: PgPool) {
     const latest = events.length ? new Date(Math.max(...events.map((r) => new Date(r.updated_at).getTime()))).toISOString() : null;
     return sitemap([
       { loc: `${SITE}/`, lastmod: latest },
+      { loc: `${SITE}/evenements-a-lome`, lastmod: latest },
       { loc: `${SITE}/explorer`, lastmod: latest },
       { loc: `${SITE}/prestataires` },
       { loc: `${SITE}/organiser` },
