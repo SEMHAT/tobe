@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ensureVapid, webPushSender } from "../../packages/core/src/node/webpush.js";
 import { proxiedFetch } from "../../packages/core/src/node/proxyFetch.js";
-import { COLLECTIONS, createDb, createSasPay, runWithPayments, type Gateway, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
+import { COLLECTIONS, createDb, createPayGate, createSasPay, runWithPayments, type Gateway, DEFAULT_GOOGLE_CLIENT_ID, handleApi, preVerify, sendLoginCode, ToBeService, type ApiResult, type DbSnapshot, type EledjiProfile } from "../../packages/core/src/index.js";
 
 /** Le strict nécessaire d'un client Postgres (pg ou @neondatabase/serverless). */
 export interface PgClient {
@@ -35,7 +35,7 @@ export function serviceOptions(env: Record<string, string | undefined>) {
     adminEmails: list(env.ADMIN_EMAILS),
     paymentsEnabled: env.PAYMENTS_ENABLED === "true",
     // Paiement réel dès que la clé secrète SasPay est configurée sur Vercel.
-    checkout: !!env.SASPAY_SECRET_KEY,
+    checkout: !!gatewayFrom(env),
     // Validation de chaque publication par l'équipe (désactivable avec PREMODERATION=false).
     premoderation: env.PREMODERATION !== "false",
     exposeOtp: env.EXPOSE_OTP === "true",
@@ -167,11 +167,21 @@ export async function profilEledji(pool: PgPool, cookie: string | undefined): Pr
 }
 
 let gatewayCache: { key: string; gw: Gateway } | null = null;
-/** Connecteur SasPay si la clé secrète est configurée (SASPAY_SECRET_KEY), sinon rien. */
+/**
+ * Agrégateur de paiement, choisi par variable d'environnement :
+ * PAYMENT_PROVIDER=paygate + PAYGATE_AUTH_TOKEN → PayGate Global ; sinon SasPay si SASPAY_SECRET_KEY.
+ * Les envois d'argent passent par le relais à IP fixe (SASPAY_PROXY_URL / FIXIE_URL) dans les deux cas.
+ */
 export function gatewayFrom(env: Record<string, string | undefined>): Gateway | null {
+  const proxy = env.SASPAY_PROXY_URL || env.FIXIE_URL || env.QUOTAGUARDSTATIC_URL || "";
+  const pg = env.PAYGATE_AUTH_TOKEN?.trim();
+  if (env.PAYMENT_PROVIDER === "paygate" && pg) {
+    const k = `paygate|${pg}|${proxy}`;
+    if (gatewayCache?.key !== k) gatewayCache = { key: k, gw: createPayGate({ authToken: pg, baseUrl: env.PAYGATE_BASE_URL || undefined, payoutFetcher: proxy ? proxiedFetch(proxy) : undefined }) };
+    return gatewayCache.gw;
+  }
   const key = env.SASPAY_SECRET_KEY?.trim();
   if (!key) return null;
-  const proxy = env.SASPAY_PROXY_URL || env.FIXIE_URL || env.QUOTAGUARDSTATIC_URL || "";
   const cacheKey = `${key}|${proxy}`;
   if (gatewayCache?.key !== cacheKey) gatewayCache = { key: cacheKey, gw: createSasPay({ secretKey: key, baseUrl: env.SASPAY_BASE_URL || undefined, payoutFetcher: proxy ? proxiedFetch(proxy) : undefined }) };
   return gatewayCache.gw;

@@ -9,5 +9,9 @@ Disallow: /notifications
 Disallow: /creer
 Disallow: /organisateur
 Disallow: /tobe
+Disallow: /paiement/
+Disallow: /groupe/
+Disallow: /visage/
+Disallow: /app.html
 
 Sitemap: https://tobe.eledji.com/sitemap.xml

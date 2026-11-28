@@ -18,10 +18,18 @@ export interface SeoEvent {
   description: string;
   cover: string | null;
   visibility: "public" | "unlisted" | "private";
-  access: "free" | "paid" | "invite";
-  ticketTypes: { price: number }[];
+  access: "free" | "paid" | "invite" | "none";
+  ticketTypes: { price: number; quota?: number | null; sold?: number }[];
   organizerName: string;
+  entryInfo?: string | null;
+  /** En vérification ou retiré par l'équipe : jamais montré aux moteurs. */
+  moderation?: "review" | "suspended" | null;
+  cancelledAt?: string | null;
+  cancelReason?: string | null;
 }
+
+/** Visible dans Google et Bing : public et pas en modération. */
+export const isListed = (e: SeoEvent) => e.visibility === "public" && !e.moderation;
 
 export interface SeoContest {
   id: string;
@@ -63,6 +71,8 @@ const absolute = (u: string | null) => (!u ? DEFAULT_IMAGE : /^https?:\/\//.test
 export const dateFr = (iso: string) =>
   new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Lome" }).format(new Date(iso));
 
+const soldOut = (e: SeoEvent) => e.access === "paid" && e.ticketTypes.length > 0 && e.ticketTypes.every((t) => !!t.quota && (t.sold ?? 0) >= t.quota);
+
 const priceFrom = (e: SeoEvent) => (e.access === "paid" && e.ticketTypes.length ? Math.min(...e.ticketTypes.map((t) => t.price)) : 0);
 
 const CATEGORIES: Record<string, string> = {
@@ -83,7 +93,7 @@ const CATEGORIES: Record<string, string> = {
 // Pages fixes
 // ---------------------------------------------------------------------------
 
-const navLinks = `<nav><a href="/">Accueil</a> · <a href="/explorer">Agenda des événements à Lomé</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/photos">Pass ToBe</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
+const navLinks = `<nav><a href="/">Accueil</a> · <a href="/explorer">Agenda des événements à Lomé</a> · <a href="/prestataires">Prestataires événementiels</a> · <a href="/photos">Retrouver mes photos</a> · <a href="/observatoire">Observatoire des événements</a> · <a href="/securite">Payer en sécurité</a> · <a href="https://eledji.com">Un service ELEDJI</a></nav>`;
 
 function eventList(events: SeoEvent[]) {
   if (!events.length) return "<p>Aucun événement public à venir pour le moment. Les organisateurs publient leurs événements sur ToBe en 2 minutes.</p>";
@@ -111,6 +121,61 @@ export function explorerMeta(upcoming: SeoEvent[]): PageMeta {
     ],
     body: `<main><h1>Agenda des événements à Lomé</h1><p>Concerts, soirées, conférences, concours, festivals : tous les événements publics de Lomé, avec réservation des places en ligne.</p>${eventList(upcoming)}${navLinks}</main>`,
   };
+}
+
+const ORG_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${SITE}/#site`,
+      name: BRAND,
+      alternateName: ["ToBe", "ToBe by ELEDJI"],
+      url: `${SITE}/`,
+      inLanguage: "fr",
+      publisher: { "@id": `${SITE}/#org` },
+    },
+    {
+      "@type": "Organization",
+      "@id": `${SITE}/#org`,
+      name: BRAND,
+      alternateName: "ToBe",
+      url: `${SITE}/`,
+      logo: `${SITE}/icon-512.png`,
+      description: "Plateforme des événements de Lomé : agenda, billetterie Mobile Money, votes, cagnottes et galeries photo avec reconnaissance faciale.",
+      areaServed: { "@type": "Country", name: "Togo" },
+      address: { "@type": "PostalAddress", addressLocality: "Lomé", addressCountry: "TG" },
+      parentOrganization: { "@type": "Organization", name: "ELEDJI", url: "https://eledji.com" },
+    },
+  ],
+};
+
+/** Page d'accueil : les prochains événements en liens lisibles par Google et Bing. */
+export function homeMeta(upcoming: SeoEvent[]): PageMeta {
+  return {
+    status: 200,
+    title: "ToBe Lomé : événements à Lomé, billets Mobile Money, votes et photos",
+    description: "Que faire à Lomé ? Concerts, soirées, conférences, festivals : réservez vos places en Mobile Money, votez, contribuez aux cagnottes et retrouvez vos photos grâce à votre visage.",
+    canonical: `${SITE}/`,
+    image: DEFAULT_IMAGE,
+    robots: null,
+    jsonLd: [
+      ORG_LD,
+      { "@context": "https://schema.org", "@type": "ItemList", name: "Prochains événements à Lomé", itemListElement: upcoming.slice(0, 30).map((e, i) => ({ "@type": "ListItem", position: i + 1, url: `${SITE}/evenement/${e.slug}`, name: e.title })) },
+    ],
+    body: `<main><h1>ToBe Lomé — les événements de Lomé</h1><p>Découvrez les concerts, soirées, conférences, concours et festivals de Lomé et du Togo. Réservez vos places en Mobile Money (Moov, Mixx), votez pour vos candidats, contribuez aux cagnottes et retrouvez vos photos d'événement grâce à votre visage.</p><h2>Prochains événements</h2>${eventList(upcoming.slice(0, 30))}<p><a href="/creer">Publier un événement gratuitement</a></p>${navLinks}</main>`,
+  };
+}
+
+/** Pages d'information (contenu fixe). */
+export function infoMeta(page: "observatoire" | "securite" | "confidentialite"): PageMeta {
+  const pages = {
+    observatoire: ["Observatoire des événements au Togo : chiffres et tendances | ToBe Lomé", "Combien d'événements à Lomé, quels jours, quels types, combien de billets ? Les chiffres ouverts de la vie culturelle au Togo, mis à jour en continu.", "Observatoire des événements au Togo", "Les chiffres de la vie culturelle de Lomé et du Togo : événements par mois, par type, par ville et par jour, billets émis, prix moyen. Données agrégées, sans aucune donnée personnelle, libres de réutilisation."],
+    securite: ["Acheter ses billets en toute sécurité à Lomé | ToBe Lomé", "Organisateurs vérifiés, événements contrôlés, argent gardé jusqu'après l'événement, remboursement si annulation, QR anti-capture : comment ToBe protège vos achats.", "Payer en toute sécurité sur ToBe", "Organisateurs vérifiés par l'équipe, événements contrôlés avec preuves, argent des billets gardé jusqu'à 24 h après l'événement, remboursement automatique en cas d'annulation, QR code qui change toutes les 30 secondes."],
+    confidentialite: ["Vos données et votre visage : ce que fait ToBe | ToBe Lomé", "Empreinte du visage calculée sur votre téléphone, accord obligatoire, effacement automatique, retrait des photos : la protection des données sur ToBe (loi togolaise 2019-014).", "Vos photos, votre visage, vos règles", "ToBe applique la loi togolaise n° 2019-014 sur les données personnelles : empreinte du visage avec accord, effacée après 12 mois sans usage, retrait des photos, visages des proches avec leur accord."],
+  } as const;
+  const [title, description, h1, text] = pages[page];
+  return { status: 200, title, description, canonical: `${SITE}/${page}`, image: DEFAULT_IMAGE, robots: null, jsonLd: [], body: `<main><h1>${esc(h1)}</h1><p>${esc(text)}</p>${navLinks}</main>` };
 }
 
 export function providersMeta(): PageMeta {
@@ -141,7 +206,7 @@ export function eventJsonLd(e: SeoEvent) {
     description: clip(e.description, 500),
     startDate: e.startsAt,
     ...(e.endsAt ? { endDate: e.endsAt } : {}),
-    eventStatus: "https://schema.org/EventScheduled",
+    eventStatus: e.cancelledAt ? "https://schema.org/EventCancelled" : "https://schema.org/EventScheduled",
     eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
     location: {
       "@type": "Place",
@@ -150,10 +215,18 @@ export function eventJsonLd(e: SeoEvent) {
     },
     image: [absolute(e.cover)],
     url,
-    ...(e.access !== "invite"
-      ? { offers: { "@type": "Offer", url: `${url}/billets`, price, priceCurrency: "XOF", availability: "https://schema.org/InStock" } }
+    ...(e.access === "free" || e.access === "paid"
+      ? {
+          offers: {
+            "@type": "Offer",
+            url: `${url}/billets`,
+            price,
+            priceCurrency: "XOF",
+            availability: e.cancelledAt || soldOut(e) ? "https://schema.org/SoldOut" : "https://schema.org/InStock",
+          },
+        }
       : {}),
-    organizer: { "@type": "Organization", name: e.organizerName },
+    organizer: { "@type": "Organization", name: e.organizerName, url: SITE },
   };
 }
 
@@ -174,17 +247,25 @@ export function eventMeta(e: SeoEvent): PageMeta {
   }
   const price = priceFrom(e);
   const when = dateFr(e.startsAt);
-  const priceText = e.access === "invite" ? "Sur invitation." : price === 0 ? "Entrée gratuite." : `Places dès ${price.toLocaleString("fr-FR")} FCFA.`;
+  const priceText = e.cancelledAt
+    ? `Événement annulé${e.cancelReason ? ` : ${e.cancelReason}` : ""}. Les billets achetés en ligne sont remboursés.`
+    : e.access === "invite"
+      ? "Sur invitation."
+      : e.access === "none"
+        ? clip(e.entryInfo || "Infos d'entrée auprès de l'organisateur.", 120)
+        : price === 0
+          ? "Entrée gratuite."
+          : `Places dès ${price.toLocaleString("fr-FR")} FCFA.`;
   return {
     status: 200,
-    title: clip(`${e.title} · ${e.venue}, ${e.city || "Lomé"} | ${BRAND}`, 70),
+    title: clip(`${e.cancelledAt ? "Annulé · " : ""}${e.title} · ${e.venue}, ${e.city || "Lomé"} | ${BRAND}`, 70),
     description: clip(`${e.title} — ${when} à ${e.venue}, ${e.city || "Lomé"}. ${priceText} ${e.description}`, 158),
     canonical: url,
     image: absolute(e.cover),
     // Non listé : accessible par lien, mais jamais dans Google.
-    robots: e.visibility === "unlisted" ? "noindex" : null,
-    jsonLd: e.visibility === "public" ? [eventJsonLd(e)] : [],
-    body: `<main><article><h1>${esc(e.title)}</h1><p>${esc(CATEGORIES[e.category] ?? "Événement")} · ${esc(when)} · ${esc(e.venue)}, ${esc(e.city || "Lomé")}</p><p>${esc(priceText)} Organisé par ${esc(e.organizerName)}.</p><p>${esc(clip(e.description, 1200))}</p>${e.access !== "invite" ? `<p><a href="/evenement/${encodeURIComponent(e.slug)}/billets">Réserver ma place</a></p>` : ""}</article>${navLinks}</main>`,
+    robots: e.visibility === "unlisted" || e.moderation ? "noindex" : null,
+    jsonLd: isListed(e) ? [eventJsonLd(e)] : [],
+    body: `<main><article><h1>${esc(e.title)}</h1><p>${esc(CATEGORIES[e.category] ?? "Événement")} · ${esc(when)} · ${esc(e.venue)}, ${esc(e.city || "Lomé")}</p><p>${esc(priceText)} Organisé par ${esc(e.organizerName)}.</p><p>${esc(clip(e.description, 1200))}</p>${(e.access === "free" || e.access === "paid") && !e.cancelledAt ? `<p><a href="/evenement/${encodeURIComponent(e.slug)}/billets">Réserver ma place</a></p>` : ""}</article>${navLinks}</main>`,
   };
 }
 

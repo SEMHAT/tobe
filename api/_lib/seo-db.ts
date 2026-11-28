@@ -1,5 +1,5 @@
 // Lectures en base pour le référencement (aucune écriture). Le pool est injecté : testable avec PGlite.
-import { SITE, cagnotteMeta, contestMeta, eventMeta, explorerMeta, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
+import { SITE, cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isListed, isUpcoming, notFoundMeta, providersMeta, sitemap, type PageMeta, type SeoCagnotte, type SeoContest, type SeoEvent } from "./seo.js";
 import { ensureSchema, type PgPool } from "./store.js";
 
 export function seoQueries(pool: PgPool) {
@@ -28,11 +28,13 @@ export function seoQueries(pool: PgPool) {
     } catch {
       return notFoundMeta();
     }
-    if (parts.length === 1 && parts[0] === "explorer") {
+    const upcoming = async () => {
       const rows = await q<SeoEvent>("SELECT data, updated_at FROM docs WHERE collection = 'events' AND data->>'visibility' = 'public'");
-      const upcoming = rows.map((r) => r.data).filter((e) => isUpcoming(e)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-      return explorerMeta(upcoming);
-    }
+      return rows.map((r) => r.data).filter((e) => isListed(e) && !e.cancelledAt && isUpcoming(e)).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    };
+    if (parts.length === 0) return homeMeta(await upcoming());
+    if (parts.length === 1 && parts[0] === "explorer") return explorerMeta(await upcoming());
+    if (parts.length === 1 && (parts[0] === "observatoire" || parts[0] === "securite" || parts[0] === "confidentialite")) return infoMeta(parts[0]);
     if (parts.length === 1 && parts[0] === "prestataires") return providersMeta();
     if (parts.length === 2 && parts[0] === "evenement") {
       const e = await one<SeoEvent>("events", parts[1], true);
@@ -52,7 +54,7 @@ export function seoQueries(pool: PgPool) {
   }
 
   async function sitemapXml(): Promise<string> {
-    const events = await q<SeoEvent>("SELECT data, updated_at FROM docs WHERE collection = 'events' AND data->>'visibility' = 'public'");
+    const events = (await q<SeoEvent>("SELECT data, updated_at FROM docs WHERE collection = 'events' AND data->>'visibility' = 'public'")).filter((r) => isListed(r.data));
     const publicIds = new Set(events.map((r) => r.data.id));
     const contests = await q<SeoContest>("SELECT data, updated_at FROM docs WHERE collection = 'contests'");
     const cagnottes = await q<SeoCagnotte>("SELECT data, updated_at FROM docs WHERE collection = 'cagnottes'");
@@ -61,6 +63,9 @@ export function seoQueries(pool: PgPool) {
       { loc: `${SITE}/`, lastmod: latest },
       { loc: `${SITE}/explorer`, lastmod: latest },
       { loc: `${SITE}/prestataires` },
+      { loc: `${SITE}/observatoire`, lastmod: latest },
+      { loc: `${SITE}/securite` },
+      { loc: `${SITE}/confidentialite` },
       ...events.map((r) => ({ loc: `${SITE}/evenement/${encodeURIComponent(r.data.slug)}`, lastmod: r.updated_at })),
       ...contests.filter((r) => publicIds.has(r.data.eventId)).map((r) => ({ loc: `${SITE}/vote/${encodeURIComponent(r.data.id)}`, lastmod: r.updated_at })),
       ...cagnottes.filter((r) => publicIds.has(r.data.eventId)).map((r) => ({ loc: `${SITE}/cagnotte/${encodeURIComponent(r.data.id)}`, lastmod: r.updated_at })),

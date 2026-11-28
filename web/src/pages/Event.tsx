@@ -30,7 +30,7 @@ import { useEffect, useState } from "react";
 import { askNotifications } from "../components/AppPrompts";
 import { currentEndpoint, pushState } from "../lib/push";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { EventMap } from "../components/Map";
+import { EventMap } from "../components/LazyMap";
 import { Button, Card, ErrorState, IconButton, PageLoader, Progress, Sheet, TopBar, cx, inputCls } from "../components/ui";
 import { Avatar, Img, Poster, TierBadge } from "../components/visual";
 import { api } from "../lib/api";

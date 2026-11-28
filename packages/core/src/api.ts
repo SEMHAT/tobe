@@ -168,6 +168,7 @@ export const routes: Route[] = [
   // Réservé à la couche paiement du serveur (appels à SasPay hors transaction).
   { method: "GET", path: "/internal/intents/pending", handler: (s, c) => (internal(c), s.pendingIntents()) },
   { method: "GET", path: "/internal/intents/:id", handler: (s, c) => (internal(c), s.intentForCheckout(c.params.id)) },
+  { method: "POST", path: "/payments/:id/payer", handler: (s, c) => s.setIntentPayer(need(c), c.params.id, c.body) },
   { method: "POST", path: "/internal/intents/:id/attach", handler: (s, c) => (internal(c), s.attachCheckout(c.params.id, String(b(c).sessionId), String(b(c).url))) },
   { method: "POST", path: "/internal/intents/:id/fail", handler: (s, c) => (internal(c), s.failIntent(c.params.id, b(c).status === "expired" ? "expired" : "failed", (b(c).error as string) ?? null)) },
   { method: "POST", path: "/internal/intents/:id/settle", handler: (s, c) => (internal(c), s.settleIntent(c.params.id, (b(c).transactionId as string) ?? null)) },

@@ -16,7 +16,7 @@ const pool = new Pool({ connectionString: process.env.ELEDJI_DATABASE_URL ?? pro
 let template: string | null = null;
 async function getTemplate(host: string | undefined): Promise<string> {
   if (template) return template;
-  for (const p of [path.join(process.cwd(), "dist", "index.html"), path.join(process.cwd(), "web", "dist", "index.html")]) {
+  for (const p of [path.join(process.cwd(), "dist", "app.html"), path.join(process.cwd(), "dist", "index.html"), path.join(process.cwd(), "web", "dist", "index.html")]) {
     try {
       template = fs.readFileSync(p, "utf8");
       return template;
@@ -24,7 +24,7 @@ async function getTemplate(host: string | undefined): Promise<string> {
       /* fichier absent : on essaie le suivant */
     }
   }
-  const r = await fetch(`https://${host ?? "tobe.eledji.com"}/index.html`);
+  const r = await fetch(`https://${host ?? "tobe.eledji.com"}/app.html`);
   template = await r.text();
   return template;
 }

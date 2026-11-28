@@ -1,6 +1,8 @@
 import { CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import type { PayoutNetwork } from "@tobe/core";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { MobileMoneyFields } from "../components/Refunds";
 import { Button, TopBar } from "../components/ui";
 import { api } from "../lib/api";
 import { formatFcfa } from "../lib/format";
@@ -13,6 +15,7 @@ interface Status {
   description: string;
   link: string | null;
   error: string | null;
+  payer?: string | null;
 }
 
 /** Retour de la page de paiement : on vérifie auprès de l'agrégateur jusqu'à confirmation. */
@@ -24,6 +27,23 @@ export function PaymentReturn() {
   const [err, setErr] = useState<string | null>(null);
   const [waited, setWaited] = useState(0);
   const done = useRef(false);
+  const [sp] = useSearchParams();
+  const askNumber = sp.get("payer") === "1";
+  const { me, toast } = useSession();
+  const [phone, setPhone] = useState(me?.user.phone?.replace(/\D/g, "").replace(/^228/, "") ?? "");
+  const [network, setNetwork] = useState<PayoutNetwork>("moov");
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendRequest = async () => {
+    setSending(true);
+    try {
+      await api("POST", `/payments/${id}/payer`, { phone, network });
+      setSent(true);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+    setSending(false);
+  };
 
   useEffect(() => {
     let stop = false;
@@ -95,6 +115,20 @@ export function PaymentReturn() {
               <h1 className="mt-4 font-display text-2xl font-bold">Paiement introuvable</h1>
               <p className="mt-2 text-muted">{err}</p>
             </>
+          ) : askNumber && s && !s.payer && !sent ? (
+            <div className="w-full text-left">
+              <h1 className="font-display text-2xl font-bold">Payer avec Mobile Money</h1>
+              <p className="mt-1 text-muted">
+                {s.description} · <b className="text-ink">{formatFcfa(s.amount)}</b>
+              </p>
+              <div className="mt-5">
+                <MobileMoneyFields phone={phone} setPhone={setPhone} network={network} setNetwork={setNetwork} />
+              </div>
+              <Button full size="lg" className="mt-5" loading={sending} onClick={sendRequest}>
+                Recevoir la demande sur mon téléphone
+              </Button>
+              <p className="mt-3 text-center text-xs text-faint">Vous validez avec votre code secret Mobile Money. Ce numéro sert aussi à vous rembourser automatiquement si l'événement est annulé.</p>
+            </div>
           ) : (
             <>
               {waited < 40 ? <Loader2 className="mx-auto size-14 animate-spin text-brand" /> : <Clock className="mx-auto size-14 text-brand" />}

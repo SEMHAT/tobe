@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import cors from "cors";
 import express, { type Request } from "express";
-import { createSasPay, handleApi, preVerify, runWithPayments, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
+import { createPayGate, createSasPay, handleApi, preVerify, runWithPayments, seedDb, sendLoginCode, ToBeService, type Db } from "@tobe/core";
 import { ensureVapid, webPushSender } from "@tobe/core/src/node/webpush";
 import { proxiedFetch } from "@tobe/core/src/node/proxyFetch";
 import { config } from "./config";
@@ -12,7 +12,7 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   const cfg = { ...config, ...opts };
   if (cfg.seed) seedDb(db);
   const vapid = ensureVapid(db, process.env);
-  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, checkout: !!process.env.SASPAY_SECRET_KEY, premoderation: process.env.PREMODERATION === "true", googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
+  const svc = new ToBeService(db, { push: { publicKey: vapid.publicKey, send: webPushSender(vapid) }, exposeOtp: cfg.exposeOtp, adminEmails: cfg.adminEmails, demo: cfg.demo, paymentsEnabled: cfg.paymentsEnabled, checkout: !!(process.env.SASPAY_SECRET_KEY || (process.env.PAYMENT_PROVIDER === "paygate" && process.env.PAYGATE_AUTH_TOKEN)), premoderation: process.env.PREMODERATION === "true", googleClientId: cfg.googleClientId, sendCode: (email, code) => sendLoginCode(email, code, process.env) });
 
   const app = express();
   app.disable("x-powered-by");
@@ -24,7 +24,10 @@ export function createApp(db: Db, opts: Partial<typeof config> = {}) {
   );
   // Webhook SasPay : corps brut conservé pour la signature.
   app.use(express.json({ limit: "4mb", verify: (req, _res, buf) => void ((req as Request & { rawBody?: string }).rawBody = buf.toString("utf8")) }));
-  const gateway = process.env.SASPAY_SECRET_KEY ? createSasPay({ secretKey: process.env.SASPAY_SECRET_KEY, baseUrl: process.env.SASPAY_BASE_URL || undefined, payoutFetcher: process.env.SASPAY_PROXY_URL ? proxiedFetch(process.env.SASPAY_PROXY_URL) : undefined }) : null;
+  const proxyUrl = process.env.SASPAY_PROXY_URL;
+  const gateway = process.env.PAYMENT_PROVIDER === "paygate" && process.env.PAYGATE_AUTH_TOKEN
+    ? createPayGate({ authToken: process.env.PAYGATE_AUTH_TOKEN, baseUrl: process.env.PAYGATE_BASE_URL || undefined, payoutFetcher: proxyUrl ? proxiedFetch(proxyUrl) : undefined })
+    : process.env.SASPAY_SECRET_KEY ? createSasPay({ secretKey: process.env.SASPAY_SECRET_KEY, baseUrl: process.env.SASPAY_BASE_URL || undefined, payoutFetcher: process.env.SASPAY_PROXY_URL ? proxiedFetch(process.env.SASPAY_PROXY_URL) : undefined }) : null;
 
   // Limite simple contre les abus sur l'envoi de codes : 5 demandes par adresse et par heure.
   const otpHits = new Map<string, number[]>();

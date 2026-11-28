@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cagnotteMeta, contestMeta, eventMeta, explorerMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
+import { cagnotteMeta, contestMeta, eventMeta, explorerMeta, homeMeta, infoMeta, isUpcoming, notFoundMeta, render, sitemap, type SeoEvent } from "./seo.js";
+import { urlsAfter } from "./indexnow.js";
 
 const TEMPLATE = `<!doctype html><html lang="fr"><head>
 <title>Générique</title>
@@ -148,4 +149,35 @@ test("base Postgres : pages et sitemap reflètent la visibilité des événement
   } finally {
     await db.close();
   }
+});
+
+test("annulé, en vérification, sans billetterie, complet", () => {
+  const c = eventMeta(ev({ cancelledAt: "2026-12-01T00:00:00Z", cancelReason: "Pluie" }));
+  assert.match(c.title, /^Annulé · /);
+  assert.equal((c.jsonLd[0] as { eventStatus: string }).eventStatus, "https://schema.org/EventCancelled");
+  assert.ok(!c.body.includes("/billets"), "plus de lien de réservation");
+  const r = eventMeta(ev({ moderation: "review" }));
+  assert.equal(r.robots, "noindex");
+  assert.equal(r.jsonLd.length, 0);
+  const n = eventMeta(ev({ access: "none", entryInfo: "Billets au guichet du stade" }));
+  assert.match(n.description, /guichet/);
+  assert.equal((n.jsonLd[0] as { offers?: unknown }).offers, undefined, "pas de prix inventé");
+  const full = eventMeta(ev({ ticketTypes: [{ price: 5000, quota: 10, sold: 10 }] }));
+  assert.equal((full.jsonLd[0] as { offers: { availability: string } }).offers.availability, "https://schema.org/SoldOut");
+});
+
+test("accueil et pages d'information : liens vers les événements, une seule balise", () => {
+  const h = render(TEMPLATE, homeMeta([ev()]));
+  assert.equal((h.match(/<title>/g) ?? []).length, 1);
+  assert.match(h, /href="\/evenement\/concert-de-noel"/);
+  assert.match(h, /"@type":"Organization"/);
+  const o = infoMeta("observatoire");
+  assert.equal(o.canonical, "https://tobe.eledji.com/observatoire");
+});
+
+test("IndexNow : seulement après une action sur un événement", () => {
+  assert.deepEqual(urlsAfter("GET", "/events/x", { slug: "a" }), []);
+  assert.deepEqual(urlsAfter("POST", "/me/face", {}), []);
+  assert.ok(urlsAfter("POST", "/events", { slug: "fete" }).includes("https://tobe.eledji.com/evenement/fete"));
+  assert.ok(urlsAfter("POST", "/admin/events/e1/moderation", {}).includes("https://tobe.eledji.com/explorer"));
 });

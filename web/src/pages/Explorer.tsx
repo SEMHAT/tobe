@@ -3,7 +3,7 @@ import { List, Map as MapIcon, Search, SearchX, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { eventPath, RowCard, SkeletonRows, TileCard } from "../components/events";
-import { EventMap } from "../components/Map";
+import { EventMap } from "../components/LazyMap";
 import { Chip, Empty, ErrorState, Segmented, inputCls } from "../components/ui";
 import { CategoryIcon } from "../components/visual";
 import { api } from "../lib/api";

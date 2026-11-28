@@ -310,3 +310,45 @@ test("Retrouve-moi : look de la soirée, tenue, « C'est moi » et apprentissage
   assert.equal(g2.photos.length, 3);
   assert.equal(g2.suggestions.length, 0);
 });
+
+test("PayGate : numéro choisi sur ToBe, validation sur le téléphone, remboursement sur ce numéro", async () => {
+  const { createPayGate } = await import("./paygate.js");
+  const calls: { path: string; body: Record<string, unknown> }[] = [];
+  const paidIds = new Set<string>();
+  const fake = (async (url: string, init: { body: string }) => {
+    const path = new URL(url).pathname;
+    const body = JSON.parse(init.body);
+    calls.push({ path, body });
+    const json = path.endsWith("/v1/pay") ? (paidIds.add(body.identifier), { tx_reference: 77, status: 0 }) : path.endsWith("/v2/status") ? { status: paidIds.has(body.identifier) ? 0 : 2, tx_reference: 77, payment_reference: "FL123" } : { status: 0, tx_reference: 88 };
+    return new Response(JSON.stringify(json), { status: 200 });
+  }) as unknown as typeof fetch;
+  const gw = createPayGate({ authToken: "cle", fetcher: fake });
+  const db = createDb();
+  const svc = new ToBeService(db, { exposeOtp: true, checkout: true });
+  const login = (email: string) => {
+    const { devCode } = svc.requestOtp(email) as { devCode: string };
+    return svc.verifyOtp(email, devCode, email) as { token: string; user: { id: string } };
+  };
+  const call = (method: string, path: string, token: string | null, body?: unknown) =>
+    runWithPayments(async (q) => handleApi(svc, { method: q.method, path: q.path, body: q.body, token: q.token ?? null, verified: { internal: q.verified?.internal === true } }), { gateway: gw, publicUrl: "https://tobe.test" }, { method, path, token, body });
+  const orga = login("orga@exemple.tg");
+  db.users.update(orga.user.id, { verification: { status: "verified" } as never, trusted: true });
+  const ev = svc.createEvent(orga.user.id, { title: "Gala", category: "concert", startsAt: new Date(Date.now() + 3 * 86400_000).toISOString(), venue: "Lomé", description: "", visibility: "public", access: "paid", ticketTypes: [{ name: "Std", price: 3000, quota: 50 }], expectedAttendance: 100, reach: "ville", options: {} as never });
+  db.events.update(ev.id, { approvedAt: new Date().toISOString() });
+  const fan = login("fan@exemple.tg");
+  const r = await call("POST", `/events/${ev.id}/tickets`, fan.token, { ticketTypeId: ev.ticketTypes[0].id, qty: 1, method: "online" });
+  const { checkoutUrl, intentId } = r.body as { checkoutUrl: string; intentId: string };
+  assert.equal(checkoutUrl, `https://tobe.test/paiement/${intentId}?payer=1`, "le client choisit son numéro sur ToBe (pas de clé dans l'adresse)");
+  assert.equal(calls.length, 0);
+  assert.equal((await call("POST", `/payments/${intentId}/payer`, fan.token, { phone: "+228 99 88 77 66", network: "moov" })).status, 200);
+  assert.deepEqual(calls[0], { path: "/api/v1/pay", body: { auth_token: "cle", phone_number: "99887766", amount: 3000, description: calls[0].body.description, identifier: intentId, network: "FLOOZ" } });
+  const v = await call("POST", `/payments/${intentId}/verify`, fan.token);
+  assert.equal((v.body as { status: string }).status, "paid");
+  assert.equal(svc.myTickets(fan.user.id).length, 1);
+  // Un autre ne peut pas changer le numéro.
+  const x = login("x@exemple.tg");
+  assert.equal((await call("POST", `/payments/${intentId}/payer`, x.token, { phone: "90000000", network: "togocel" })).status, 404);
+  // Annulation : remboursé sur le numéro qui a payé, sans rien demander.
+  svc.cancelEvent(orga.user.id, ev.id, "Salle indisponible");
+  assert.deepEqual(svc.myRefunds(fan.user.id).map((y) => [y.amount, y.phone, y.network, y.needsNumber]), [[3000, "99887766", "moov", false]]);
+});

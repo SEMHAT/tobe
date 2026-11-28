@@ -11,6 +11,8 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1600,
+    // Liste des fichiers de la version : le service worker les garde tous pour l'usage hors connexion.
+    manifest: "asset-manifest.json",
     rollupOptions: { output: { manualChunks: { faceapi: ["@vladmandic/face-api"] } } },
   },
 });

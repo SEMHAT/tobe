@@ -5,7 +5,8 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { InstallPrompt, NotifyPrompt, OfflineBanner } from "./AppPrompts";
 import { useRouteRobots } from "../lib/seo";
 import { SessionProvider, useSession } from "../lib/session";
-import { cx } from "./ui";
+import { PageLoader, cx } from "./ui";
+import { Suspense } from "react";
 import { useT } from "../lib/i18n";
 import { LanguagePicker } from "./LanguagePicker";
 import { Avatar, Logo, QR } from "./visual";
@@ -158,7 +159,9 @@ function Frame() {
         <DesktopNav />
         <div className={cx(loc.pathname !== "/" && "lg:mx-auto lg:px-8 lg:pt-6", loc.pathname !== "/" && (wide ? "lg:max-w-[1240px]" : "lg:max-w-[820px]"))}>
           <ErrorBoundary resetKey={loc.pathname}>
-            <Outlet />
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         </div>
         <Footer />

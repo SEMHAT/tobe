@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
+import { indexNow, urlsAfter } from "./_lib/indexnow.js";
 import { profilEledji, readPrivateFile, runApiWithPayments, savePrivateFile, sessionUser, type PgPool } from "./_lib/store.js";
 
 if (typeof WebSocket !== "undefined") neonConfig.webSocketConstructor = WebSocket;
@@ -95,6 +96,11 @@ export default async function handler(req: Req, res: ServerResponse) {
       { method: req.method ?? "GET", path: `/${sub}`, query, body, token, eledji: eledji ?? undefined },
       rawText !== null ? { body: rawText, signature: header("x-webhook-signature"), timestamp: header("x-webhook-timestamp") } : undefined,
     );
+    // Bing : on signale tout de suite les pages qui viennent de changer.
+    if (r.status === 200) {
+      const urls = urlsAfter(req.method ?? "GET", `/${sub}`, r.body);
+      if (urls.length) await indexNow(urls);
+    }
     return send(res, r.status, r.body);
   } catch (e) {
     console.error(e);

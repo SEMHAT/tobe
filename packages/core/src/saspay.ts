@@ -16,6 +16,10 @@ export interface CheckoutInput {
 
 export interface Gateway {
   readonly mode: "sandbox" | "live";
+  /** hosted : page de paiement de l'agrégateur (SasPay) · push : le client valide sur son téléphone (PayGate). */
+  readonly flow?: "hosted" | "push";
+  /** Demande de paiement envoyée au téléphone du client (flow « push »). */
+  push?(sessionId: string, input: { phone: string; network: PayoutNetwork; amount: number; description: string }): Promise<{ reference: string | null }>;
   createCheckout(input: CheckoutInput): Promise<{ id: string; url: string }>;
   /** paid · pending · failed · expired */
   checkoutStatus(id: string): Promise<{ status: "paid" | "pending" | "failed" | "expired"; transactionId: string | null }>;

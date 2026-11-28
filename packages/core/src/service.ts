@@ -942,8 +942,10 @@ export class ToBeService {
       const paid = this.db.payments.find((p) => p.kind === "ticket" && p.refId === o.id && !!p.intentId);
       if (paid && paid.amount > 0) {
         const buyer = this.db.users.get(o.userId);
-        const phone = buyer?.phone ? this.localPhone(buyer.phone) : null;
-        const network = phone ? guessNetwork(phone) : null;
+        // Le numéro qui a payé (PayGate) d'abord, sinon celui du profil.
+        const intent = this.db.intents.get(paid.intentId!);
+        const phone = intent?.payerPhone ?? (buyer?.phone ? this.localPhone(buyer.phone) : null);
+        const network = intent?.payerNetwork ?? (phone ? guessNetwork(phone) : null);
         this.db.payouts.insert({ id: newId("rmb"), userId: o.userId, eventId: e.id, intentIds: [paid.intentId!], amount: paid.amount, phone: network ? phone : null, network, status: "queued", kind: "refund", orderId: o.id, gatewayId: null, attempts: 0, error: null, createdAt: this.iso(), updatedAt: this.iso() });
         refunds++;
         refundTotal += paid.amount;
@@ -1337,7 +1339,22 @@ export class ToBeService {
   paymentStatus(userId: string | null, intentId: string) {
     const i = this.db.intents.get(intentId);
     if (!i) throw new ApiError(404, "Paiement introuvable");
-    return { id: i.id, status: i.status, amount: i.amount, description: i.description, link: i.resultLink, error: i.status === "paid" ? i.error : null, mine: !!userId && userId === i.userId };
+    return { id: i.id, status: i.status, amount: i.amount, description: i.description, link: i.resultLink, error: i.status === "paid" ? i.error : null, mine: !!userId && userId === i.userId, payer: i.payerPhone ?? null };
+  }
+
+  /** Numéro qui paie (PayGate) : seul le client concerné peut le choisir, avant le paiement. */
+  setIntentPayer(userId: string, intentId: string, input: { phone: string; network: PayoutNetwork }) {
+    const user = this.requireUser(userId);
+    const i = this.db.intents.get(intentId);
+    if (!i || i.userId !== user.id) throw new ApiError(404, "Paiement introuvable");
+    if (i.status === "paid") throw new ApiError(400, "Ce paiement est déjà fait");
+    const local = this.localPhone(input?.phone);
+    if (!/^[79]\d{7}$/.test(local)) throw new ApiError(400, "Numéro Mobile Money togolais invalide (8 chiffres, ex. 90 12 34 56)");
+    if (!["moov", "togocel", "mixx"].includes(input?.network)) throw new ApiError(400, "Choisissez Moov Money ou Mixx by Yas");
+    this.db.intents.update(i.id, { payerPhone: local, payerNetwork: input.network, status: "pending" });
+    // Gardé sur le profil (s'il n'y en a pas) : remboursements automatiques et paiements suivants plus rapides.
+    if (!user.phone) this.db.users.update(user.id, { phone: local });
+    return { id: i.id, amount: i.amount, description: i.description, phone: local, network: input.network, sessionId: i.gatewaySessionId ?? i.id };
   }
 
   // ---------- Reversements aux organisateurs ----------

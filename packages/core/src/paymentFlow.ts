@@ -52,6 +52,28 @@ export async function runWithPayments(run: Runner, opts: FlowOptions, req: FlowR
     return { status: 200, body: { ok: true, signed, ...r } };
   }
 
+  // Notification PayGate : simple signal, comme pour SasPay (tout est revérifié auprès de l'API).
+  if (method === "POST" && path === "/paygate/callback") {
+    const r = await reconcile(internal, gw, log);
+    await processPayouts(internal, gw, log);
+    return { status: 200, body: { ok: true, ...r } };
+  }
+
+  // PayGate : le client a choisi son numéro, on envoie la demande de paiement sur son téléphone.
+  if (method === "POST" && /^\/payments\/[^/]+\/payer$/.test(path)) {
+    if (!gw.push) return { status: 400, body: { error: "Ce moyen de paiement ne demande pas de numéro" } };
+    const r = await run(req);
+    if (r.status !== 200) return r;
+    const p = r.body as { id: string; amount: number; description: string; phone: string; network: PayoutNetwork; sessionId: string };
+    try {
+      await gw.push(p.sessionId, { phone: p.phone, network: p.network, amount: p.amount, description: p.description });
+      return { status: 200, body: { ok: true, phone: p.phone } };
+    } catch (e) {
+      log("demande de paiement", p.id, e);
+      return { status: 502, body: { error: (e as Error).message || "Le paiement Mobile Money est momentanément indisponible." } };
+    }
+  }
+
   // Tâche planifiée (toutes les 5 minutes) : filet de sécurité si un webhook s'est perdu.
   if ((method === "POST" || method === "GET") && path === "/cron/payments") {
     const r = await reconcile(internal, gw, log);

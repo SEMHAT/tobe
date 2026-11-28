@@ -14,7 +14,6 @@ import {
   Trophy,
   Volleyball,
 } from "lucide-react";
-import QRCode from "qrcode";
 import { useEffect, useState, type ReactNode } from "react";
 import { absoluteMedia } from "../lib/api";
 import { resolveMedia } from "../lib/media";
@@ -159,7 +158,7 @@ export function Avatar({ name, src, size = 44, className, ring }: { name: string
 export function QR({ value, size = 220, className }: { value: string; size?: number; className?: string }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
-    QRCode.toDataURL(value, { margin: 1, width: size * 2, errorCorrectionLevel: "M", color: { dark: "#0e0e12", light: "#ffffff" } }).then(setUrl);
+    import("qrcode").then(({ default: QRCode }) => QRCode.toDataURL(value, { margin: 1, width: size * 2, errorCorrectionLevel: "M", color: { dark: "#0e0e12", light: "#ffffff" } })).then(setUrl);
   }, [value, size]);
   return url ? <img src={url} width={size} height={size} alt={`QR code ${value}`} className={className} /> : <div className={cx("skeleton rounded-xl", className)} style={{ width: size, height: size }} />;
 }

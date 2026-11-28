@@ -1,7 +1,7 @@
 // Service worker de ToBe : l'application s'ouvre et s'utilise hors connexion
 // (événements, billets et profil déjà consultés), et reçoit les notifications push
 // même quand elle est fermée, comme WhatsApp.
-const VERSION = "tobe-v5";
+const VERSION = "tobe-v6";
 const COQUILLE = `${VERSION}-coquille`; // index.html + scripts/styles de la version en ligne
 const MEDIAS = "tobe-medias";             // affiches et photos déjà vues (gardées d'une version à l'autre)
 const MAX_MEDIAS = 250;
@@ -13,13 +13,19 @@ async function garderCoquille(html) {
   // Les fichiers de la version (noms uniques) : l'application démarre sans réseau dès la 1re visite.
   const fichiers = [...new Set([...html.matchAll(/\/(?:assets|models)\/[^"'\s)]+/g)].map((m) => m[0]))];
   await Promise.all(fichiers.map(async (u) => { try { if (!(await c.match(u))) { const r = await fetch(u); if (r.ok) await c.put(u, r); } } catch {} }));
+  // Pages chargées à la demande (billets, scanner…) : gardées aussi, sauf le module de reconnaissance faciale (lourd).
+  try {
+    const m = await (await fetch("/asset-manifest.json", { cache: "no-store" })).json();
+    const autres = [...new Set(Object.values(m).flatMap((x) => [x.file, ...(x.css || [])]))].filter((f) => f && !/faceapi/.test(f)).map((f) => `/${f}`);
+    await Promise.all(autres.map(async (u) => { try { if (!(await c.match(u))) { const r = await fetch(u); if (r.ok) await c.put(u, r); } } catch {} }));
+  } catch {}
 }
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
     (async () => {
       try {
-        const r = await fetch("/index.html", { cache: "no-store" });
+        const r = await fetch("/app.html", { cache: "no-store" }).then((x) => (x.ok ? x : fetch("/index.html", { cache: "no-store" })));
         if (r.ok) await garderCoquille(await r.text());
       } catch {}
       await (await caches.open(COQUILLE)).addAll(["/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/logo.png", "/badge-96.png"]).catch(() => {});

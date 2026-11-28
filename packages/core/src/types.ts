@@ -195,6 +195,9 @@ export interface PaymentIntent {
   status: "created" | "pending" | "paid" | "failed" | "expired";
   gatewaySessionId: string | null;
   checkoutUrl: string | null;
+  /** Numéro Mobile Money qui paie (paiement « sur le téléphone », PayGate) : sert aussi au remboursement. */
+  payerPhone?: string | null;
+  payerNetwork?: PayoutNetwork | null;
   transactionId: string | null;
   /** Ce qui a été créé une fois payé (commande, vote…), pour y renvoyer le client. */
   resultRef: string | null;

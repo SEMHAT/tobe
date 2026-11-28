@@ -15,3 +15,4 @@ export * from "./saspay.js";
 export * from "./paymentFlow.js";
 export * from "./qr.js";
 export * from "./faceMatch.js";
+export * from "./paygate.js";
